@@ -1,0 +1,18 @@
+{
+  "name": "@kama/window",
+  "version": "0.1.0",
+  "license": "MIT OR Apache-2.0",
+  "description": "A window and its events: several windows and a headless mode, one coalescing event queue, physical keys and text, gamepads",
+  "repository": "https://github.com/cosmic-canopy/kama-window",
+  "keywords": ["window", "input", "events", "keyboard", "gamepad"],
+  "kind": "library",
+  "kama": ">=0.9.831",
+  "publish": {
+    "exclude": [
+      ".claude/", "AGENTS.md", "AGENTS.package.md", "AGENTS.window.md", "CLAUDE.md", "KAMA_GAPS.md"
+    ]
+  },
+  "modules": {
+    ".": { "visibility": "public" }
+  }
+}

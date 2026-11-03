@@ -1,0 +1,9 @@
+# @kama/window
+
+A window and its events, for [kama](https://kama-lang.org): several windows and a headless mode, one coalescing event
+queue, physical keys and text, an explicit `pump()`, and gamepads.
+
+**Status: seeded, not built.** `src/window.kama` is `kama seed`'s placeholder. The design is kama's (its
+`docs/ROADMAP_DETAIL.md` § 8, KR-26), and kyoten builds it as its first consumer.
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
