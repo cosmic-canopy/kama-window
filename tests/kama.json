@@ -1,0 +1,14 @@
+{
+  "name": "windowtests",
+  "version": "0.1.0",
+  "kind": "executable",
+  "kama": ">=0.9.874",
+  "description": "@kama/window's tests: the queue's order, coalescing and drops on a headless window, the key table, a system window",
+  "entry": "src/main.kama",
+  "modules": {
+    ".": { "visibility": "internal" }
+  },
+  "dependencies": {
+    "@kama/window": { "path": ".." }
+  }
+}

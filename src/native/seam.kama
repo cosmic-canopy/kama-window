@@ -1,0 +1,76 @@
+// The C seam (csrc/winseam.h), as kama. An extern never leaves its file, so each is published through a wrapper.
+
+export {
+    winseam_event,
+    KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_MOUSE_MOVE, KIND_MOUSE_BUTTON, KIND_SCROLL, KIND_RESIZE,
+    KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK, KIND_CLOSE_REQUESTED, KIND_DROPPED,
+    openWindow, headlessWindow, closeWindow, pumpWindow, nextEvent, postEvent, windowSize, framebufferSize,
+    windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
+};
+
+extern "winseam.h";
+
+comptime int32 KIND_KEY_DOWN = 1;
+comptime int32 KIND_KEY_UP = 2;
+comptime int32 KIND_TEXT = 3;
+comptime int32 KIND_MOUSE_MOVE = 4;
+comptime int32 KIND_MOUSE_BUTTON = 5;
+comptime int32 KIND_SCROLL = 6;
+comptime int32 KIND_RESIZE = 7;
+comptime int32 KIND_SCALE_CHANGED = 8;
+comptime int32 KIND_FOCUS = 9;
+comptime int32 KIND_POINTER_LOCK = 10;
+comptime int32 KIND_CLOSE_REQUESTED = 11;
+comptime int32 KIND_DROPPED = 12;
+
+// One ring record; the header owns the layout, and kama asserts each field against it at build.
+@generate(zero)
+type extern value winseam_event {
+    public int32 kind;
+    public int32 a;
+    public int32 b;
+    public int32 c;
+    public float64 x;
+    public float64 y;
+    public float64 dx;
+    public float64 dy;
+}
+
+extern fn UnsafePtr winseam_open(UnsafeConstPtr<cchar> title, int32 width, int32 height, UnsafePtr<uint8> why,
+                                 int32 capacity, UnsafePtr<int32> why_length);
+extern fn UnsafePtr winseam_headless(int32 width, int32 height);
+extern fn void winseam_close(UnsafePtr window);
+extern fn void winseam_pump(UnsafePtr window);
+extern fn int32 winseam_next(UnsafePtr window, UnsafePtr into);
+extern fn void winseam_post(UnsafePtr window, UnsafeConstPtr event);
+extern fn void winseam_size(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height);
+extern fn void winseam_framebuffer_size(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height);
+extern fn float32 winseam_scale(UnsafePtr window);
+extern fn void winseam_set_cursor(UnsafePtr window, int32 mode);
+extern fn int32 winseam_native_kind(UnsafePtr window);
+extern fn UnsafePtr winseam_native_display(UnsafePtr window);
+extern fn UnsafePtr winseam_native_window(UnsafePtr window);
+extern fn int32 winseam_glfw_key_to_hid(int32 glfw_key);
+
+unsafe fn UnsafePtr openWindow(UnsafeConstPtr<cchar> title, int32 width, int32 height, UnsafePtr<uint8> why,
+                               int32 capacity, UnsafePtr<int32> whyLength) {
+    return winseam_open(title: title, width: width, height: height, why: why, capacity: capacity,
+                        why_length: whyLength);
+}
+unsafe fn UnsafePtr headlessWindow(int32 width, int32 height) { return winseam_headless(width: width, height: height); }
+unsafe fn void closeWindow(UnsafePtr window) { winseam_close(window: window); }
+unsafe fn void pumpWindow(UnsafePtr window) { winseam_pump(window: window); }
+unsafe fn int32 nextEvent(UnsafePtr window, UnsafePtr into) { return winseam_next(window: window, into: into); }
+unsafe fn void postEvent(UnsafePtr window, UnsafeConstPtr event) { winseam_post(window: window, event: event); }
+unsafe fn void windowSize(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height) {
+    winseam_size(window: window, width: width, height: height);
+}
+unsafe fn void framebufferSize(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height) {
+    winseam_framebuffer_size(window: window, width: width, height: height);
+}
+unsafe fn float32 windowScale(UnsafePtr window) { return winseam_scale(window: window); }
+unsafe fn void setCursor(UnsafePtr window, int32 mode) { winseam_set_cursor(window: window, mode: mode); }
+unsafe fn int32 nativeKind(UnsafePtr window) { return winseam_native_kind(window: window); }
+unsafe fn UnsafePtr nativeDisplay(UnsafePtr window) { return winseam_native_display(window: window); }
+unsafe fn UnsafePtr nativeWindow(UnsafePtr window) { return winseam_native_window(window: window); }
+unsafe fn int32 glfwKeyToHid(int32 glfwKey) { return winseam_glfw_key_to_hid(glfw_key: glfwKey); }

@@ -1,0 +1,4 @@
+# LF in the repository AND in the worktree, on every platform, as in kama, kyoten and the peer games. Without it a
+# Windows checkout obeys `core.autocrlf` and lands every text file as CRLF, which breaks wherever bytes are compared
+# rather than executed, and a shell script with CRLF fails under a strict sh. Binary files are left alone.
+* text=auto eol=lf

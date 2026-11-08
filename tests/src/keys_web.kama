@@ -1,0 +1,7 @@
+file @compileFor(ARCH_WASM32);
+// On the web there is no GLFW table to test (the DOM's `code` table comes with the web window).
+
+import { Tally };
+export { keyTable };
+
+fn void keyTable(ref Tally t) { }

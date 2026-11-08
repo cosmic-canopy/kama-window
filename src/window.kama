@@ -1,14 +1,267 @@
-// The library surface. This file sits at the top of `source`, so it is in the project's ROOT module —
-// the one `kama.json`'s `name` names — and `export` is what importers can see:
-// `import { window::answer };`
+// @kama/window: a window and its events. The design is kama's (ROADMAP_DETAIL.md § 8, s8-input, KR-26):
 //
-// To add a module, make a folder under `source` and list it in `modules`. A folder with no entry is not
-// a module: its files belong to the nearest listed folder above them, so nothing joins your API by
-// accident.
+// - A `Window` is a GLFW window natively (the web's `#canvas` comes next) with its own event queue, so several work. A
+//   headless one has the queue and a size and nothing behind them: `post` fills it, for tests, replays and servers.
+// - `pump()` is explicit; `pollEvent()` takes one event at a time, in the order they happened, so a resize and a click
+//   stay in order. The queue is a fixed ring that coalesces moves, scrolls and resizes, and reports `Dropped(n)` rather
+//   than dropping in silence.
+// - A `Key` is a physical key, named as the DOM's `KeyboardEvent.code` names it and numbered by its USB HID usage id,
+//   whatever the layout; typed text arrives separately, as `Text`.
+// - Positions and sizes are logical; `scale()` converts to pixels, and `framebufferSize()` is in pixels.
+// - It is not `Sendable`: a window lives on the thread that opened it, which GLFW requires.
 
-export { answer };
+import {
+    std::collections::DynamicArray,
+    std::encoding::utf8::decode, std::encoding::utf8::Utf8Error,
+    window::native::winseam_event,
+    window::native::KIND_KEY_DOWN, window::native::KIND_KEY_UP, window::native::KIND_TEXT,
+    window::native::KIND_MOUSE_MOVE, window::native::KIND_MOUSE_BUTTON, window::native::KIND_SCROLL,
+    window::native::KIND_RESIZE, window::native::KIND_SCALE_CHANGED, window::native::KIND_FOCUS,
+    window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
+    window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
+    window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::windowSize,
+    window::native::framebufferSize, window::native::windowScale, window::native::setCursor,
+    window::native::nativeKind, window::native::nativeDisplay, window::native::nativeWindow,
+};
 
-fn int32 answer()
-{
-    return 42;
+export { Window, WindowError, Event, Key, MouseButton, Mods, CursorMode, Size, NativeKind, NativeWindow };
+
+type enum WindowError implements Error {
+    Refused(string words);   // the system would not open the window, in its words
+
+    public const fn string message() { return match (this) { case Refused(words: w): copy w; }; }
+}
+
+// Modifier bits, as `KeyDown`, `KeyUp` and `MouseButton` carry them: `(mods & Mods::Shift) != 0`.
+type value Mods {
+    public comptime uint8 Shift = 1;
+    public comptime uint8 Control = 2;
+    public comptime uint8 Alt = 4;
+    public comptime uint8 Super = 8;
+    public comptime uint8 CapsLock = 16;
+    public comptime uint8 NumLock = 32;
+}
+
+type enum MouseButton : uint8 { Left = 0, Right = 1, Middle = 2, Back = 3, Forward = 4, Sixth = 5, Seventh = 6, Eighth = 7 }
+
+type enum CursorMode { Normal, Hidden, Locked }
+
+type value Size {
+    public int32 width;
+    public int32 height;
+
+    public ctor make(int32 width, int32 height) { this.width = width; this.height = height; }
+}
+
+// A physical key: the name is the DOM's `KeyboardEvent.code`, the number its USB HID usage id (the keyboard page).
+type enum Key : uint16 {
+    Unknown = 0,
+    KeyA = 4, KeyB = 5, KeyC = 6, KeyD = 7, KeyE = 8, KeyF = 9, KeyG = 10, KeyH = 11, KeyI = 12, KeyJ = 13, KeyK = 14,
+    KeyL = 15, KeyM = 16, KeyN = 17, KeyO = 18, KeyP = 19, KeyQ = 20, KeyR = 21, KeyS = 22, KeyT = 23, KeyU = 24,
+    KeyV = 25, KeyW = 26, KeyX = 27, KeyY = 28, KeyZ = 29,
+    Digit1 = 30, Digit2 = 31, Digit3 = 32, Digit4 = 33, Digit5 = 34, Digit6 = 35, Digit7 = 36, Digit8 = 37,
+    Digit9 = 38, Digit0 = 39,
+    Enter = 40, Escape = 41, Backspace = 42, Tab = 43, Space = 44, Minus = 45, Equal = 46, BracketLeft = 47,
+    BracketRight = 48, Backslash = 49, IntlHash = 50, Semicolon = 51, Quote = 52, Backquote = 53, Comma = 54,
+    Period = 55, Slash = 56, CapsLock = 57,
+    F1 = 58, F2 = 59, F3 = 60, F4 = 61, F5 = 62, F6 = 63, F7 = 64, F8 = 65, F9 = 66, F10 = 67, F11 = 68, F12 = 69,
+    PrintScreen = 70, ScrollLock = 71, Pause = 72, Insert = 73, Home = 74, PageUp = 75, Delete = 76, End = 77,
+    PageDown = 78, ArrowRight = 79, ArrowLeft = 80, ArrowDown = 81, ArrowUp = 82,
+    NumLock = 83, NumpadDivide = 84, NumpadMultiply = 85, NumpadSubtract = 86, NumpadAdd = 87, NumpadEnter = 88,
+    Numpad1 = 89, Numpad2 = 90, Numpad3 = 91, Numpad4 = 92, Numpad5 = 93, Numpad6 = 94, Numpad7 = 95, Numpad8 = 96,
+    Numpad9 = 97, Numpad0 = 98, NumpadDecimal = 99, IntlBackslash = 100, ContextMenu = 101, NumpadEqual = 103,
+    F13 = 104, F14 = 105, F15 = 106, F16 = 107, F17 = 108, F18 = 109, F19 = 110, F20 = 111, F21 = 112, F22 = 113,
+    F23 = 114, F24 = 115,
+    ControlLeft = 224, ShiftLeft = 225, AltLeft = 226, MetaLeft = 227, ControlRight = 228, ShiftRight = 229,
+    AltRight = 230, MetaRight = 231
+}
+
+type enum Event {
+    KeyDown(Key key, uint8 mods, bool repeat),
+    KeyUp(Key key, uint8 mods),
+    Text(char c),
+    MouseMove(float64 x, float64 y, float64 dx, float64 dy),   // locked, x and y mean nothing and dx, dy are raw
+    MouseButton(MouseButton button, bool down, uint8 mods),
+    Scroll(float64 dx, float64 dy),
+    Resize(int32 width, int32 height),
+    ScaleChanged(float32 scale),
+    Focus(bool focused),
+    PointerLock(bool locked),
+    CloseRequested,
+    Dropped(int32 count)                                       // the queue was full: this many events were lost
+}
+
+// What a GPU surface is made from. `kind` says which system's handles `display` and `window` are.
+type enum NativeKind { None, Win32, X11, Wayland, Cocoa, Canvas }
+
+type value NativeWindow {
+    public NativeKind kind;
+    public UnsafePtr display;   // HINSTANCE, Display*, wl_display*
+    public UnsafePtr window;    // HWND, X11 Window, wl_surface*, NSWindow*, the canvas selector's C string
+
+    public unsafe ctor make(NativeKind kind, UnsafePtr display, UnsafePtr window) {
+        this.kind = kind; this.display = display; this.window = window;
+    }
+}
+
+unsafe fn Key keyOf(int32 hid) {
+    if (hid < 0 || hid > 65535) { return Key::Unknown; }
+    Optional<Key> k = try cast<Key>(cast<uint16>(hid));
+    return match (k) {
+        case Some(value: v): v;
+        case None: Key::Unknown;
+    };
+}
+
+unsafe fn MouseButton buttonOf(int32 n) {
+    if (n < 0 || n > 255) { return MouseButton::Eighth; }
+    Optional<MouseButton> b = try cast<MouseButton>(cast<uint8>(n));
+    return match (b) {
+        case Some(value: v): v;
+        case None: MouseButton::Eighth;
+    };
+}
+
+unsafe fn uint8 modsOf(int32 n) { return truncate<uint8>(n & 63); }
+
+// A ring record as an Event.
+unsafe fn Event eventOf(const ref winseam_event e) {
+    int32 k = e.kind;
+    if (k == KIND_KEY_DOWN) { return Event::KeyDown(key: keyOf(hid: e.a), mods: modsOf(n: e.b), repeat: e.c != 0); }
+    if (k == KIND_KEY_UP) { return Event::KeyUp(key: keyOf(hid: e.a), mods: modsOf(n: e.b)); }
+    if (k == KIND_TEXT) { return Event::Text(c: cast<char>(cast<uint32>(e.a))); }
+    if (k == KIND_MOUSE_MOVE) { return Event::MouseMove(x: e.x, y: e.y, dx: e.dx, dy: e.dy); }
+    if (k == KIND_MOUSE_BUTTON) {
+        return Event::MouseButton(button: buttonOf(n: e.a), down: e.c != 0, mods: modsOf(n: e.b));
+    }
+    if (k == KIND_SCROLL) { return Event::Scroll(dx: e.dx, dy: e.dy); }
+    if (k == KIND_RESIZE) { return Event::Resize(width: e.a, height: e.b); }
+    if (k == KIND_SCALE_CHANGED) { return Event::ScaleChanged(scale: cast<float32>(e.x)); }
+    if (k == KIND_FOCUS) { return Event::Focus(focused: e.a != 0); }
+    if (k == KIND_POINTER_LOCK) { return Event::PointerLock(locked: e.a != 0); }
+    if (k == KIND_CLOSE_REQUESTED) { return Event::CloseRequested; }
+    return Event::Dropped(count: e.a);
+}
+
+// An Event as a ring record, for `post`.
+unsafe fn winseam_event recordOf(const ref Event event) {
+    winseam_event e = winseam_event.zero();
+    match (event) {
+        case KeyDown(key: key, mods: mods, repeat: repeat): {
+            e.kind = KIND_KEY_DOWN; e.a = cast<int32>(key); e.b = cast<int32>(mods);
+            if (repeat) { e.c = 1; }
+        }
+        case KeyUp(key: key, mods: mods): { e.kind = KIND_KEY_UP; e.a = cast<int32>(key); e.b = cast<int32>(mods); }
+        case Text(c: c): { e.kind = KIND_TEXT; e.a = cast<int32>(c); }
+        case MouseMove(x: x, y: y, dx: dx, dy: dy): { e.kind = KIND_MOUSE_MOVE; e.x = x; e.y = y; e.dx = dx; e.dy = dy; }
+        case MouseButton(button: button, down: down, mods: mods): {
+            e.kind = KIND_MOUSE_BUTTON; e.a = cast<int32>(button); e.b = cast<int32>(mods);
+            if (down) { e.c = 1; }
+        }
+        case Scroll(dx: dx, dy: dy): { e.kind = KIND_SCROLL; e.dx = dx; e.dy = dy; }
+        case Resize(width: w, height: h): { e.kind = KIND_RESIZE; e.a = w; e.b = h; }
+        case ScaleChanged(scale: s): { e.kind = KIND_SCALE_CHANGED; e.x = cast<float64>(s); }
+        case Focus(focused: f): { e.kind = KIND_FOCUS; if (f) { e.a = 1; } }
+        case PointerLock(locked: l): { e.kind = KIND_POINTER_LOCK; if (l) { e.a = 1; } }
+        case CloseRequested: { e.kind = KIND_CLOSE_REQUESTED; }
+        case Dropped(count: n): { e.kind = KIND_DROPPED; e.a = n; }
+    };
+    return e;
+}
+
+type resource Window {
+    UnsafePtr seam;
+
+    // A system window, `width` × `height` logical, titled `title`.
+    public unsafe ctor Result<Window, WindowError> open(const ref string title, int32 width, int32 height) {
+        InlineArray<uint8>#(512) why = [0; 512];
+        int32 whyLength = 0;
+        UnsafePtr s = openWindow(title: title.cstr(), width: width, height: height, why: addr(of: why[0]),
+                                 capacity: 512, whyLength: addr(of: whyLength));
+        if (s == null) {
+            DynamicArray<uint8> bytes = DynamicArray.empty();
+            isize i = 0;
+            while (i < cast<isize>(whyLength)) { bytes.add(item: why[i]); i = i + 1; }
+            Result<string, Utf8Error> r = decode(bytes: bytes.view());
+            string words = match (give r) {
+                case Ok(value: t): give t;
+                case Err(error: e): "(not UTF-8)";
+            };
+            return Result::Err(error: WindowError::Refused(words: give words));
+        }
+        return Result::Ok(value: Window.adopt(seam: s));
+    }
+
+    // A window with nothing behind it: its queue, filled by `post`, and its size. Never touches the system.
+    public unsafe ctor headless(int32 width, int32 height) { this.seam = headlessWindow(width: width, height: height); }
+
+    unsafe ctor adopt(UnsafePtr seam) { this.seam = seam; }
+
+    // Take the system's pending events into the queue (every open window's, natively). Headless, nothing.
+    public unsafe fn void pump() { if (this.seam != null) { pumpWindow(window: this.seam); } }
+
+    // The next event, oldest first; None when the queue is empty.
+    public unsafe fn Optional<Event> pollEvent() {
+        if (this.seam == null) { return Optional::None; }
+        winseam_event e = winseam_event.zero();
+        if (nextEvent(window: this.seam, into: cast<UnsafePtr>(addr(of: e))) == 0) { return Optional::None; }
+        return Optional::Some(value: eventOf(e: e));
+    }
+
+    // An event into the queue as if the system had sent it (coalesced like one). A Resize also sets the size.
+    public unsafe fn void post(const ref Event event) {
+        if (this.seam == null) { return; }
+        winseam_event e = recordOf(event: event);
+        postEvent(window: this.seam, event: cast<UnsafeConstPtr>(addr(of: e)));
+    }
+
+    // Logical size.
+    public unsafe const fn Size size() {
+        Size s = Size.make(width: 0, height: 0);
+        if (this.seam != null) { windowSize(window: this.seam, width: addr(of: s.width), height: addr(of: s.height)); }
+        return s;
+    }
+
+    // Size in pixels.
+    public unsafe const fn Size framebufferSize() {
+        Size s = Size.make(width: 0, height: 0);
+        if (this.seam != null) {
+            framebufferSize(window: this.seam, width: addr(of: s.width), height: addr(of: s.height));
+        }
+        return s;
+    }
+
+    // Pixels per logical unit.
+    public unsafe const fn float32 scale() {
+        if (this.seam == null) { return 1.0; }
+        return windowScale(window: this.seam);
+    }
+
+    // Normal, hidden, or locked (hidden with raw, unbounded motion); a PointerLock event says when a lock takes hold.
+    public unsafe fn void setCursor(CursorMode mode) {
+        if (this.seam == null) { return; }
+        int32 m = match (mode) {
+            case Normal: 0;
+            case Hidden: 1;
+            case Locked: 2;
+        };
+        setCursor(window: this.seam, mode: m);
+    }
+
+    // The system's handles, for a GPU surface. None for a headless window, and natively on Windows only so far.
+    public unsafe const fn NativeWindow nativeHandle() {
+        NativeKind kind = NativeKind::None;
+        if (this.seam != null) {
+            int32 k = nativeKind(window: this.seam);
+            if (k == 1) { kind = NativeKind::Win32; }
+            if (k == 2) { kind = NativeKind::X11; }
+            if (k == 3) { kind = NativeKind::Wayland; }
+            if (k == 4) { kind = NativeKind::Cocoa; }
+            if (k == 5) { kind = NativeKind::Canvas; }
+        }
+        if (this.seam == null) { return NativeWindow.make(kind: kind, display: null, window: null); }
+        return NativeWindow.make(kind: kind, display: nativeDisplay(window: this.seam), window: nativeWindow(window: this.seam));
+    }
+
+    unsafe ~Window() { closeWindow(window: this.seam); }
 }

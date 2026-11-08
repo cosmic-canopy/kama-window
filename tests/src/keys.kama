@@ -1,0 +1,81 @@
+file @compileFor(!ARCH_WASM32);
+// The key table, tested by externing the C translator (kama's design: "the key tables are tested by externing the C
+// translators directly"), against GLFW's own key constants rather than numbers typed here.
+
+import { Tally, window::Key };
+export { keyTable };
+
+extern "winseam.h";
+extern "<GLFW/glfw3.h>";
+extern fn int32 winseam_glfw_key_to_hid(int32 glfw_key);
+
+extern const int32 GLFW_KEY_A;
+extern const int32 GLFW_KEY_Z;
+extern const int32 GLFW_KEY_0;
+extern const int32 GLFW_KEY_1;
+extern const int32 GLFW_KEY_ESCAPE;
+extern const int32 GLFW_KEY_SPACE;
+extern const int32 GLFW_KEY_LEFT_SHIFT;
+extern const int32 GLFW_KEY_RIGHT_SUPER;
+extern const int32 GLFW_KEY_KP_0;
+extern const int32 GLFW_KEY_KP_9;
+extern const int32 GLFW_KEY_F12;
+extern const int32 GLFW_KEY_F24;
+extern const int32 GLFW_KEY_UP;
+extern const int32 GLFW_KEY_WORLD_1;
+extern const int32 GLFW_KEY_LAST;
+
+unsafe fn int32 hidOf(int32 glfwKey) { return winseam_glfw_key_to_hid(glfw_key: glfwKey); }
+
+unsafe fn void pair(ref Tally t, int32 glfwKey, Key want, const ref string name) {
+    int32 got = hidOf(glfwKey: glfwKey);
+    int32 w = cast<int32>(want);
+    if (got == w) { t.verdict(name: "GLFW's ${name} is HID ${w}", why: ""); }
+    else { t.verdict(name: "GLFW's ${name} is HID ${w}", why: "the table gives ${got}"); }
+}
+
+unsafe fn void keyTable(ref Tally t) {
+    pair(t: t, glfwKey: GLFW_KEY_A, want: Key::KeyA, name: "A");
+    pair(t: t, glfwKey: GLFW_KEY_Z, want: Key::KeyZ, name: "Z");
+    pair(t: t, glfwKey: GLFW_KEY_0, want: Key::Digit0, name: "0");
+    pair(t: t, glfwKey: GLFW_KEY_1, want: Key::Digit1, name: "1");
+    pair(t: t, glfwKey: GLFW_KEY_ESCAPE, want: Key::Escape, name: "Escape");
+    pair(t: t, glfwKey: GLFW_KEY_SPACE, want: Key::Space, name: "Space");
+    pair(t: t, glfwKey: GLFW_KEY_LEFT_SHIFT, want: Key::ShiftLeft, name: "left shift");
+    pair(t: t, glfwKey: GLFW_KEY_RIGHT_SUPER, want: Key::MetaRight, name: "right super");
+    pair(t: t, glfwKey: GLFW_KEY_KP_0, want: Key::Numpad0, name: "keypad 0");
+    pair(t: t, glfwKey: GLFW_KEY_KP_9, want: Key::Numpad9, name: "keypad 9");
+    pair(t: t, glfwKey: GLFW_KEY_F12, want: Key::F12, name: "F12");
+    pair(t: t, glfwKey: GLFW_KEY_F24, want: Key::F24, name: "F24");
+    pair(t: t, glfwKey: GLFW_KEY_UP, want: Key::ArrowUp, name: "up");
+    pair(t: t, glfwKey: GLFW_KEY_WORLD_1, want: Key::Unknown, name: "WORLD_1 (no US position)");
+
+    // Every GLFW key: unmapped, or a HID id that names a Key, and no two GLFW keys on one id.
+    InlineArray<int32>#(256) claimedBy = [0; 256];
+    int32 mapped = 0;
+    int32 notAKey = 0;
+    int32 twice = 0;
+    int32 k = 0;
+    while (k <= GLFW_KEY_LAST) {
+        int32 h = hidOf(glfwKey: k);
+        if (h != 0) {
+            mapped = mapped + 1;
+            if (h < 0 || h > 255) {
+                notAKey = notAKey + 1;
+            } else {
+                Optional<Key> named = try cast<Key>(cast<uint16>(h));
+                if (named.isNone()) { notAKey = notAKey + 1; }
+                isize at = cast<isize>(h);
+                if (claimedBy[at] != 0) { twice = twice + 1; }
+                claimedBy[at] = k;
+            }
+        }
+        k = k + 1;
+    }
+    if (notAKey == 0 && twice == 0 && mapped > 100) {
+        t.verdict(name: "every GLFW key is unmapped or one Key of its own (${mapped} mapped)", why: "");
+    } else {
+        t.verdict(name: "every GLFW key is unmapped or one Key of its own",
+                  why: "${mapped} mapped, ${notAKey} to no Key, ${twice} sharing an id");
+    }
+}

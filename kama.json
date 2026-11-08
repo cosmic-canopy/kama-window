@@ -6,13 +6,25 @@
   "repository": "https://github.com/cosmic-canopy/kama-window",
   "keywords": ["window", "input", "events", "keyboard", "gamepad"],
   "kind": "library",
-  "kama": ">=0.9.831",
+  "kama": ">=0.9.874",
   "publish": {
     "exclude": [
-      ".claude/", "AGENTS.md", "AGENTS.package.md", "AGENTS.window.md", "CLAUDE.md", "KAMA_GAPS.md"
+      ".claude/", "AGENTS.md", "AGENTS.package.md", "AGENTS.window.md", "CLAUDE.md", "KAMA_GAPS.md", "tools/"
     ]
   },
   "modules": {
-    ".": { "visibility": "public" }
-  }
+    ".": { "visibility": "public" },
+    "native": { "visibility": "internal" }
+  },
+  "cincludes": ["csrc"],
+  "csources": ["csrc/winseam.c"],
+  "ldflags": [
+    { "flag": "-l:libglfw3.a", "compileFor": ["OS_WINDOWS"] },
+    { "flag": "-lgdi32", "compileFor": ["OS_WINDOWS"] },
+    { "flag": "-luser32", "compileFor": ["OS_WINDOWS"] }
+  ],
+  "link": [
+    { "name": "glfw", "compileFor": ["OS_LINUX"] },
+    { "name": "glfw", "compileFor": ["OS_MACOS"] }
+  ]
 }

@@ -1,0 +1,194 @@
+// @kama/window's tests, one program (AGENTS.package.md). A failing case prints its name; the exit status is 1 when any
+// failed. The headless cases need no display; the system-window case is skipped when KAMA_WINDOW_NO_DISPLAY is set
+// (a CI runner with no display).
+
+import {
+    core::println,
+    core::env::envOr,
+    window::Window, window::WindowError, window::Event, window::Key, window::MouseButton, window::Mods,
+    window::Size, window::NativeKind, window::NativeWindow,
+    keyTable,
+};
+
+export { Tally };
+
+type resource Tally {
+    int32 runs = 0;
+    int32 failures = 0;
+
+    public ctor make() { }
+
+    public fn void verdict(const ref string name, const ref string why) {
+        this.runs = this.runs + 1;
+        if (why.isEmpty()) {
+            println(s: "ok   ${name}");
+        } else {
+            this.failures = this.failures + 1;
+            println(s: "FAIL ${name}: ${why}");
+        }
+    }
+
+    public const fn int32 failed() { return this.failures; }
+    public const fn int32 count() { return this.runs; }
+}
+
+// What an event is, as text, for a failure's message and for comparing.
+fn string describe(const ref Event e) {
+    match (e) {
+        case KeyDown(key: k, mods: m, repeat: r): { int32 kn = cast<int32>(k); return "KeyDown ${kn} ${m} ${r}"; }
+        case KeyUp(key: k, mods: m): { int32 kn = cast<int32>(k); return "KeyUp ${kn} ${m}"; }
+        case Text(c: c): { int32 cp = cast<int32>(c); return "Text ${cp}"; }
+        case MouseMove(x: x, y: y, dx: dx, dy: dy): { return "MouseMove ${x} ${y} ${dx} ${dy}"; }
+        case MouseButton(button: b, down: d, mods: m): { int32 bn = cast<int32>(b); return "MouseButton ${bn} ${d} ${m}"; }
+        case Scroll(dx: dx, dy: dy): { return "Scroll ${dx} ${dy}"; }
+        case Resize(width: w, height: h): { return "Resize ${w} ${h}"; }
+        case ScaleChanged(scale: s): { return "ScaleChanged ${s}"; }
+        case Focus(focused: f): { return "Focus ${f}"; }
+        case PointerLock(locked: l): { return "PointerLock ${l}"; }
+        case CloseRequested: { return "CloseRequested"; }
+        case Dropped(count: n): { return "Dropped ${n}"; }
+    };
+}
+
+unsafe fn string next(ref Window w) {
+    Optional<Event> e = w.pollEvent();
+    return match (e) {
+        case Some(value: v): describe(e: v);
+        case None: "(empty)";
+    };
+}
+
+unsafe fn void expectNext(ref Tally t, ref Window w, const ref string name, const ref string want) {
+    string got = next(w: w);
+    if (got == want) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: "got `${got}`, not `${want}`"); }
+}
+
+// Posted events come back in order, continuous changes coalesced into the newest unread one of their kind.
+unsafe fn void queueOrder(ref Tally t) {
+    Window w = Window.headless(width: 640, height: 360);
+    Size s = w.size();
+    if (s.width == 640 && s.height == 360) {
+        t.verdict(name: "a headless window has its size", why: "");
+    } else {
+        t.verdict(name: "a headless window has its size", why: "${s.width}×${s.height}");
+    }
+    w.pump();   // nothing behind it: no events appear
+    expectNext(t: t, w: w, name: "a new headless window's queue is empty", want: "(empty)");
+
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: Mods::Shift, repeat: false));
+    w.post(event: Event::MouseMove(x: 10.0, y: 20.0, dx: 1.0, dy: 2.0));
+    w.post(event: Event::MouseMove(x: 12.0, y: 25.0, dx: 2.0, dy: 5.0));
+    w.post(event: Event::MouseMove(x: 15.0, y: 30.0, dx: 3.0, dy: 5.0));
+    w.post(event: Event::MouseButton(button: MouseButton::Left, down: true, mods: 0));
+    w.post(event: Event::Scroll(dx: 0.0, dy: 1.0));
+    w.post(event: Event::Scroll(dx: 0.0, dy: 2.0));
+    w.post(event: Event::Resize(width: 800, height: 600));
+    w.post(event: Event::Resize(width: 1024, height: 768));
+    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0));
+    w.post(event: Event::Text(c: 'é'));
+    w.post(event: Event::CloseRequested);
+
+    expectNext(t: t, w: w, name: "a key down comes back first, with its mods", want: "KeyDown 4 1 false");
+    expectNext(t: t, w: w, name: "three moves coalesce: the last position, the summed motion",
+               want: "MouseMove 15 30 6 12");
+    expectNext(t: t, w: w, name: "a click after the moves", want: "MouseButton 0 true 0");
+    expectNext(t: t, w: w, name: "two scrolls coalesce into their sum", want: "Scroll 0 3");
+    expectNext(t: t, w: w, name: "two resizes coalesce into the last", want: "Resize 1024 768");
+    expectNext(t: t, w: w, name: "the key up keeps its place", want: "KeyUp 4 0");
+    expectNext(t: t, w: w, name: "typed text is a codepoint", want: "Text 233");
+    expectNext(t: t, w: w, name: "a close request is an event", want: "CloseRequested");
+    expectNext(t: t, w: w, name: "then the queue is empty", want: "(empty)");
+
+    Size after = w.size();
+    if (after.width == 1024 && after.height == 768) {
+        t.verdict(name: "a posted resize sets the size", why: "");
+    } else {
+        t.verdict(name: "a posted resize sets the size", why: "${after.width}×${after.height}");
+    }
+    NativeWindow n = w.nativeHandle();
+    bool none = match (n.kind) { case None: true; case Win32: false; case X11: false; case Wayland: false;
+                                 case Cocoa: false; case Canvas: false; };
+    if (none) { t.verdict(name: "a headless window has no native handle", why: ""); }
+    else { t.verdict(name: "a headless window has no native handle", why: "it has one"); }
+}
+
+// A full ring keeps what it holds and counts what followed in one Dropped(n), in order; then it takes events again.
+unsafe fn void queueDrops(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    int32 i = 0;
+    while (i < 300) {
+        w.post(event: Event::KeyDown(key: Key::Space, mods: 0, repeat: true));
+        i = i + 1;
+    }
+    int32 keys = 0;
+    string last = "";
+    bool reading = true;
+    while (reading) {
+        string got = next(w: w);
+        if (got == "KeyDown 44 0 true") { keys = keys + 1; } else { last = copy got; reading = false; }
+    }
+    if (keys == 255 && last == "Dropped 45") {
+        t.verdict(name: "a full ring keeps 255 events and reports Dropped 45 after them", why: "");
+    } else {
+        t.verdict(name: "a full ring keeps 255 events and reports Dropped 45 after them",
+                  why: "${keys} events, then `${last}`");
+    }
+    expectNext(t: t, w: w, name: "the drop is reported once", want: "(empty)");
+    w.post(event: Event::Focus(focused: true));
+    expectNext(t: t, w: w, name: "the drained ring takes events again", want: "Focus true");
+}
+
+// On the web, until the html5 window is built, opening one refuses, saying so, rather than half-working.
+@compileFor(ARCH_WASM32)
+unsafe fn void systemWindow(ref Tally t) {
+    Result<Window, WindowError> opened = Window.open(title: "@kama/window test", width: 320, height: 200);
+    match (give opened) {
+        case Ok(value: w): { t.verdict(name: "on the web, opening a window refuses (not built yet)", why: "it opened"); }
+        case Err(error: e): { t.verdict(name: "on the web, opening a window refuses (not built yet)", why: ""); }
+    };
+}
+
+// A system window opens, has a size and a native handle, and closes when dropped.
+@compileFor(!ARCH_WASM32)
+unsafe fn void systemWindow(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip a system window (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    Result<Window, WindowError> opened = Window.open(title: "@kama/window test", width: 320, height: 200);
+    match (give opened) {
+        case Ok(value: w): {
+            w.pump();
+            Size s = w.size();
+            Size px = w.framebufferSize();
+            float32 scale = w.scale();
+            if (s.width > 0 && s.height > 0 && px.width > 0 && px.height > 0 && scale > 0.0) {
+                t.verdict(name: "a system window opens with a size", why: "");
+            } else {
+                t.verdict(name: "a system window opens with a size",
+                          why: "${s.width}×${s.height} logical, ${px.width}×${px.height} pixels, scale ${scale}");
+            }
+            NativeWindow n = w.nativeHandle();
+            bool has = n.window != null;
+            if (has) { t.verdict(name: "a system window has a native handle", why: ""); }
+            else { t.verdict(name: "a system window has a native handle", why: "none on this system yet"); }
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a system window opens with a size", why: why);
+        }
+    };
+}
+
+unsafe fn uint8 appMain() {
+    Tally t = Tally.make();
+    queueOrder(t: t);
+    queueDrops(t: t);
+    keyTable(t: t);
+    systemWindow(t: t);
+    int32 runs = t.count();
+    int32 failed = t.failed();
+    println(s: "window tests: ${runs} cases, ${failed} failed");
+    if (failed > 0) { return 1; }
+    return 0;
+}
+
+fn uint8 main() { return appMain(); }
