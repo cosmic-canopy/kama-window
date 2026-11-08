@@ -138,6 +138,38 @@ unsafe fn void queueDrops(ref Tally t) {
     expectNext(t: t, w: w, name: "the drained ring takes events again", want: "Focus true");
 }
 
+// A ring the reader has partly drained after a drop takes new events after the Dropped record, rather than counting
+// them into it: a key up that arrives then is delivered, not lost (found by kama's review, 2026-11-08). With only the
+// reserved slot free, a new event is still counted into the drop, so the ring never overwrites what is unread.
+unsafe fn void queueDropsPartial(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    int32 i = 0;
+    while (i < 300) {
+        w.post(event: Event::KeyDown(key: Key::Space, mods: 0, repeat: true));
+        i = i + 1;
+    }
+    string first = next(w: w);   // one read: only the slot the Dropped record holds is past the reserve
+    w.post(event: Event::Focus(focused: true));
+    i = 1;
+    while (i < 100) { string skipped = next(w: w); i = i + 1; }   // 100 read in all: room for 99 more
+    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0));
+    int32 keys = 0;
+    string after = "";
+    bool reading = true;
+    while (reading) {
+        string got = next(w: w);
+        if (got == "KeyDown 44 0 true") { keys = keys + 1; } else { after = copy got; reading = false; }
+    }
+    if (keys == 155 && after == "Dropped 46") {
+        t.verdict(name: "with only the reserved slot free, a new event is counted into the drop", why: "");
+    } else {
+        t.verdict(name: "with only the reserved slot free, a new event is counted into the drop",
+                  why: "${keys} key downs left, then `${after}`");
+    }
+    expectNext(t: t, w: w, name: "a key up after a partial drain is delivered after the drop", want: "KeyUp 4 0");
+    expectNext(t: t, w: w, name: "and then the queue is empty", want: "(empty)");
+}
+
 // On the web, until the html5 window is built, opening one refuses, saying so, rather than half-working.
 @compileFor(ARCH_WASM32)
 unsafe fn void systemWindow(ref Tally t) {
@@ -182,6 +214,7 @@ unsafe fn uint8 appMain() {
     Tally t = Tally.make();
     queueOrder(t: t);
     queueDrops(t: t);
+    queueDropsPartial(t: t);
     keyTable(t: t);
     systemWindow(t: t);
     int32 runs = t.count();

@@ -32,14 +32,18 @@ then gamepads. Before publishing, GLFW is vendored (AGENTS.package.md): today Wi
 owner, 2026-11-08: "The bar is production grade general solutions"). kama's design is where it started. Each departure
 is recorded here with its reason, and the owner relays them to kama. **Kept** marks the production answer. A
 **stopgap** is fixed before the first publish, and says what replaces it. Not departures but not built yet: the web
-half, gamepads, vendored GLFW, and native handles beyond Win32 (X11, Wayland, Cocoa).
+half, gamepads, vendored GLFW (FFD vendors 3.4 in `gfx/third_party/glfw`), and native handles beyond Win32 (X11,
+Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyoten.md`); its points are folded in below.
 
 1. **Kept: the ring is C for both kinds of window.** A headless window is the ring with no GLFW window behind it, so one
    queue is tested and a headless test never initialises GLFW (no display needed). GLFW 3.4's null platform was not
    used: it is chosen once per `glfwInit`, for the whole process.
 2. **Kept: what coalesces, and how.** Moves keep the last position and sum the motion; scrolls sum; resizes and scale
    changes keep the last. A full ring keeps one slot for a `Dropped(n)` record, so the drop is reported where it
-   happened, before anything that arrives once the reader drains it.
+   happened, before anything that arrives once the reader drains it. **Fixed 2026-11-08** (kama's review, reproduced
+   by a test first): an event was counted into a trailing `Dropped` record even after the reader had made room, so a
+   key up arriving then was lost. It now goes after the drop, and only an event that finds no free slot but the
+   reserved one is counted in.
 3. **Kept: `Key` is named by the DOM's `KeyboardEvent.code`** (`KeyA`, `Digit1`, `ArrowUp`, `ShiftLeft`) and
    numbered by the HID usage id, as the design says.
 4. **Kept: `nativeHandle()` returns a `NativeWindow` value** (a kind, a display or module, a window), the shape a GPU
@@ -53,9 +57,26 @@ half, gamepads, vendored GLFW, and native handles beyond Win32 (X11, Wayland, Co
    drops key-ups around focus changes, and a key really still held comes back with its next repeat. Both games do
    this in their platform layers: FFD's `ffd__on_blur` (`gfx/src/platform/ffd_platform.h`) and the-mallow-man's
    `release_all_synth` (`gfx/src/platform/tmm_platform.c`).
+   - **Today the backends already differ** (kama's review): GLFW releases held keys and buttons on focus loss itself,
+     after the focus callback and never on gain (GLFW 3.4 `_glfwInputWindowFocus`, read in FFD's vendored
+     `src/window.c`), so natively `Focus(false)` arrives before the key ups. A browser sends no `keyup` after `blur`.
+   - **So the ring keeps the held set itself,** releases before posting `Focus`, and drops an up for a key it does not
+     hold. GLFW's own releases then find nothing held, and every backend behaves the same way.
 6. **Stopgap: a window's native record is not reference-counted,** so a GPU surface made on it must be dropped first.
    **The production answer:** the record counts references, and a surface holds one (`@kama/gpu`'s item 9), so the
-   two drop safely in either order.
+   two drop safely in either order. On Android the OS takes the window at `SurfaceLost` whatever is counted;
+   `std::app` says so first, and every surface made on it is dropped in that call.
+7. **Missing: pointers other than a mouse, and Android** (kama's review).
+   - **Pointer events.** A phone, a tablet and a pen need touch and pen input as well as the mouse. **The production
+     answer is W3C Pointer Events,** which the web half receives anyway: one stream for mouse, touch and pen, each
+     event carrying a pointer id, its type, buttons, pressure and tilt, with down, move, up and cancel. The mouse
+     events become pointer events of type mouse. They are designed with the web half (W2), since the browser's API is
+     the design's reference.
+   - **Android.** `NativeKind` gains `Android` (an `ANativeWindow*`). The window wraps `std::app::android::window()`
+     from `SurfaceReady` to `SurfaceLost`, reads input through `std::app::android::setInputHandler`, and turns the
+     program's `FocusGained` and `FocusLost` into `Focus`. The program hands it those lifecycle events: `std::app` does
+     not route them to packages behind its back. Rotation is not a lifecycle event; the size is read from the window.
+     An undrawn Android window gets no touches (`NO_INPUT_CHANNEL`, measured by kama on the emulator).
 
 ## Where the truth is
 
@@ -73,6 +94,10 @@ half, gamepads, vendored GLFW, and native handles beyond Win32 (X11, Wayland, Co
   and the kama version.
 - **Name no engine.** Nothing here names kyoten or a game: a tool, an editor and a game use it alike.
 - **Verify, don't trust.** Compile the snippet, run it, read the emitted C. A doc is not evidence, including this one.
+- **Test-driven** (the owner, 2026-11-08). A change starts with a test that fails without it, and a bug is fixed only
+  after a test reproduces it. `tools/test.sh` passes before every commit.
+- **Dependencies are injected** (the owner, 2026-11-08). Code takes what it depends on as a parameter or a contract,
+  so a test hands it a fake; the headless window is that fake for a window's consumers.
 - **Commit on the branch, and push only when the owner asks.**
 
 ## Build

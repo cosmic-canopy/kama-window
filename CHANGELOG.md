@@ -5,6 +5,11 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- Fixed (2026-11-08, found by kama's review): the event ring counted an event into a trailing `Dropped` record
+  even after the reader had made room, so a key up arriving then was lost. It now goes after the drop; only an event
+  that finds no free slot but the reserved one is counted in. Two tests hold it: a partial drain, then a key up that
+  must arrive, and the boundary where only the reserved slot is free.
+
 - The native window and the headless one (2026-11-07, kama 0.9.874): `Window` (`open`, `headless`, `pump`,
   `pollEvent`, `post`, `size`, `framebufferSize`, `scale`, `setCursor`, `nativeHandle`), `Event`, `Key` (USB HID ids,
   DOM `code` names), `MouseButton`, `Mods` and `CursorMode`, over a C seam (`csrc/winseam.c`): one fixed event ring

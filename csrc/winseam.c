@@ -45,11 +45,18 @@ static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
 // ---- the ring ------------------------------------------------------------------------------------------------------
 
 // Coalesce into the newest unread record when it is the same kind of continuous change; otherwise append. One slot is
-// kept for a Dropped record, so when the ring fills, what follows is counted there, in order, rather than lost.
+// kept for a Dropped record, so when the ring fills, what follows is counted there, in order, rather than lost. An
+// event is counted into a trailing Dropped record only while no other slot is free: once the reader has made room, it
+// goes after the drop (counting it in regardless lost a key up that arrived then; found by kama's review, 2026-11-08).
 static void push(winseam_window *w, const winseam_event *e) {
     if (w->count > 0) {
         winseam_event *last = &w->ring[(w->head + w->count - 1) % RING];
-        if (last->kind == WINSEAM_DROPPED) { last->a += 1; return; }
+        if (last->kind == WINSEAM_DROPPED) {
+            if (w->count >= RING - 1) { last->a += 1; return; }
+            w->ring[(w->head + w->count) % RING] = *e;
+            w->count += 1;
+            return;
+        }
         if (last->kind == e->kind) {
             if (e->kind == WINSEAM_MOUSE_MOVE) {
                 last->x = e->x; last->y = e->y; last->dx += e->dx; last->dy += e->dy;
