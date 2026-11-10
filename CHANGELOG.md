@@ -5,6 +5,10 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Breaking:** the two plain values are made memberwise, by kama's rule (2026-11-10, kama 0.9.911, its SPEC
+  § Construction, KR-367): `Size.make(width:, height:)` is `Size.of(…)`, and `NativeWindow.make(kind:, display:,
+  window:)` is `NativeWindow.of(…)`, each written by `@generate(of)`. `Window.open` and `Window.headless` keep their
+  names. Entries below keep the names of their day.
 - Fixed (2026-11-08, found by kama's review): the event ring counted an event into a trailing `Dropped` record
   even after the reader had made room, so a key up arriving then was lost. It now goes after the drop; only an event
   that finds no free slot but the reserved one is counted in. Two tests hold it: a partial drain, then a key up that

@@ -46,11 +46,10 @@ type enum MouseButton : uint8 { Left = 0, Right = 1, Middle = 2, Back = 3, Forwa
 
 type enum CursorMode { Normal, Hidden, Locked }
 
+@generate(of)
 type value Size {
     public int32 width;
     public int32 height;
-
-    public ctor make(int32 width, int32 height) { this.width = width; this.height = height; }
 }
 
 // A physical key: the name is the DOM's `KeyboardEvent.code`, the number its USB HID usage id (the keyboard page).
@@ -94,14 +93,11 @@ type enum Event {
 // What a GPU surface is made from. `kind` says which system's handles `display` and `window` are.
 type enum NativeKind { None, Win32, X11, Wayland, Cocoa, Canvas }
 
+@generate(of)
 type value NativeWindow {
     public NativeKind kind;
     public UnsafePtr display;   // HINSTANCE, Display*, wl_display*
     public UnsafePtr window;    // HWND, X11 Window, wl_surface*, NSWindow*, the canvas selector's C string
-
-    public unsafe ctor make(NativeKind kind, UnsafePtr display, UnsafePtr window) {
-        this.kind = kind; this.display = display; this.window = window;
-    }
 }
 
 unsafe fn Key keyOf(int32 hid) {
@@ -217,14 +213,14 @@ type resource Window {
 
     // Logical size.
     public unsafe const fn Size size() {
-        Size s = Size.make(width: 0, height: 0);
+        Size s = Size.of(width: 0, height: 0);
         if (this.seam != null) { windowSize(window: this.seam, width: addr(of: s.width), height: addr(of: s.height)); }
         return s;
     }
 
     // Size in pixels.
     public unsafe const fn Size framebufferSize() {
-        Size s = Size.make(width: 0, height: 0);
+        Size s = Size.of(width: 0, height: 0);
         if (this.seam != null) {
             framebufferSize(window: this.seam, width: addr(of: s.width), height: addr(of: s.height));
         }
@@ -259,8 +255,8 @@ type resource Window {
             if (k == 4) { kind = NativeKind::Cocoa; }
             if (k == 5) { kind = NativeKind::Canvas; }
         }
-        if (this.seam == null) { return NativeWindow.make(kind: kind, display: null, window: null); }
-        return NativeWindow.make(kind: kind, display: nativeDisplay(window: this.seam), window: nativeWindow(window: this.seam));
+        if (this.seam == null) { return NativeWindow.of(kind: kind, display: null, window: null); }
+        return NativeWindow.of(kind: kind, display: nativeDisplay(window: this.seam), window: nativeWindow(window: this.seam));
     }
 
     unsafe ~Window() { closeWindow(window: this.seam); }

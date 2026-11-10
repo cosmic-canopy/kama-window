@@ -112,6 +112,17 @@ unsafe fn void queueOrder(ref Tally t) {
     else { t.verdict(name: "a headless window has no native handle", why: "it has one"); }
 }
 
+// The two plain values are made memberwise, by `of`, as kama names a memberwise ctor (its SPEC § Construction).
+unsafe fn void plainValues(ref Tally t) {
+    Size s = Size.of(width: 3, height: 4);
+    if (s.width == 3 && s.height == 4) { t.verdict(name: "Size.of takes its width, then its height", why: ""); }
+    else { t.verdict(name: "Size.of takes its width, then its height", why: "the fields are ${s.width} and ${s.height}"); }
+    NativeWindow n = NativeWindow.of(kind: NativeKind::Canvas, display: null, window: null);
+    bool canvas = match (n.kind) { case Canvas: true; case _: false; };
+    if (canvas && n.display == null && n.window == null) { t.verdict(name: "NativeWindow.of takes a kind and two handles", why: ""); }
+    else { t.verdict(name: "NativeWindow.of takes a kind and two handles", why: "another kind, or a handle set"); }
+}
+
 // A full ring keeps what it holds and counts what followed in one Dropped(n), in order; then it takes events again.
 unsafe fn void queueDrops(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
@@ -213,6 +224,7 @@ unsafe fn void systemWindow(ref Tally t) {
 unsafe fn uint8 appMain() {
     Tally t = Tally.make();
     queueOrder(t: t);
+    plainValues(t: t);
     queueDrops(t: t);
     queueDropsPartial(t: t);
     keyTable(t: t);
