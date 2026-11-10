@@ -10,6 +10,20 @@ hand-edited. This file is the project-specific third, and it is the one to edit.
 `Window` comes several at a time, with a headless mode and `post`. `Event` arrives in one coalescing queue that reports
 `Dropped(n)`. Keys are physical, with `Text` beside them, `pump()` is explicit, and gamepads are in.
 
+**As complete as the browser's platform APIs, native at parity** (the owner, 2026-11-10; kyoten's
+`../kyoten/docs/design/architecture.md` § Decided, how the libraries grow). Web first means the browser's APIs are the
+checklist, beyond what kyoten's hello cube needs (a window or canvas, physical keys, a gamepad, a headless window):
+- pointer and touch;
+- text input with IME composition;
+- the clipboard;
+- cursor shapes;
+- fullscreen and pointer lock;
+- DPI changes;
+- several windows, natively;
+- file drop.
+
+This repository gets its own `SPEC.md` and `ROADMAP.md`, from this list and the departures below.
+
 ## Where things stand (2026-11-07, kama 0.9.874)
 
 **The native window and the headless one work; the web window and gamepads do not exist yet.** Built (KR-26's commit 1):
