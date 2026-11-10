@@ -25,6 +25,9 @@ failed=0
 step() { echo; echo "== $*"; }
 mkdir -p tests/out
 
+step "the roadmap"
+tools/check-roadmap.sh || failed=1
+
 step "kama check"
 "$KAMA" check kama.json || failed=1
 "$KAMA" pkg install tests/kama.json > /dev/null
