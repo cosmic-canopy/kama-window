@@ -8,6 +8,8 @@
   "modules": {
     ".": { "visibility": "internal" }
   },
+  "cincludes": ["csrc"],
+  "csources": ["csrc/hooks.c"],
   "dependencies": {
     "@kama/window": { "path": ".." }
   }

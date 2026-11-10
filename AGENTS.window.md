@@ -29,8 +29,9 @@ file the agent's brief and the departures below, the record kama reads.
 ## Where things stand
 
 **[SPEC.md](SPEC.md) is what the package is, and [ROADMAP.md](ROADMAP.md) what comes next.** In short (2026-11-10, kama
-0.9.911): a system window natively on Windows and a headless one on every target, the web half and gamepads not built
-yet, and WIN-1 and WIN-2, the stopgaps, next. `tools/test.sh` passes before every commit.
+0.9.911): a system window natively on Windows and a headless one on every target, and a window's native record counted,
+so a GPU surface holds it (WIN-1, built). The web half and gamepads are not built yet, and WIN-2, the last stopgap, is
+next. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -68,10 +69,92 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
      `src/window.c`), so natively `Focus(false)` arrives before the key ups. A browser sends no `keyup` after `blur`.
    - **So the ring keeps the held set itself,** releases before posting `Focus`, and drops an up for a key it does not
      hold. GLFW's own releases then find nothing held, and every backend behaves the same way.
-6. **Stopgap, WIN-1: a window's native record is not reference-counted,** so a GPU surface made on it must be dropped first.
-   **The production answer:** the record counts references, and a surface holds one (`@kama/gpu`'s item 9), so the
-   two drop safely in either order. On Android the OS takes the window at `SurfaceLost` whatever is counted;
-   `std::app` says so first, and every surface made on it is dropped in that call.
+6. **Built on 2026-11-10: a window counts references to its native record (WIN-1)** (kama 0.9.911), replacing the
+   stopgap below. Natively on Windows (GLFW 3.5.1) and under node, test-first:
+   - **18 new cases:** 12 headless on every leg, and 6 on a system window;
+   - **8 of 9 mutations caught.** The ninth, an adopted handle releasing its null record, is equivalent, since the C
+     release ignores null;
+   - **the stopgap's own behaviour** (the window destroyed at close) turns two cases red: the HWND "was destroyed"
+     while its handle held it.
+
+   **Stopgap, replaced: the native record was not counted,** so a GPU surface made on a window had to be dropped
+   first, a rule kept only in documentation in a safe API. kama drops fields in reverse declaration order, so a type
+   declaring `Surface surface; Window window;` destroyed the HWND under a live surface.
+
+   **Measured first, on 2026-11-10** (a C probe in kyoten's `.scratch/win1-window/`, one process per case: GLFW 3.5.1
+   and wgpu-native v29.0.1.1 over Vulkan, on an AMD Radeon 880M):
+
+   | a configured surface, after its window is | wgpu-native |
+   |---|---|
+   | destroyed, then the surface released | clean |
+   | destroyed, then a frame acquired and presented | `SuccessSuboptimal`, and present answers Success: frames go nowhere, and nothing says the window is gone |
+   | **destroyed, then configured** (a resize after a close) | **the process aborts** (exit 127): "Error in wgpuSurfaceConfigure: Validation Error. Surface does not support the adapter's queue family" |
+   | destroyed while a frame is held, which is then presented | Success |
+   | hidden | acquire, present and configure all work as on a shown window |
+   | hidden, the surface released, then destroyed (this item's order) | clean |
+   | gone with `glfwTerminate` | `glfwTerminate` destroys the HWND, and acquire then answers `SuccessSuboptimal` |
+
+   On the web, read from emdawnwebgpu's `library_webgpu.js` and not run, `wgpuInstanceCreateSurface` finds the canvas
+   by its selector during the call, and the `GPUCanvasContext` then holds the canvas itself.
+
+   **Decided by the owner on 2026-11-10 (kyoten's tenth session), each as recommended,** by approving the session's
+   plan, after the probe overturned none of them:
+   1. **What holds the count: `NativeWindow`, not a `Copyable` `Window`.** A `Window` is its event queue, so its copies
+      would split the events between them, and a surface's copy would keep the window open, shown and taking clicks no
+      one reads, after the program dropped its own. winit's `Arc<Window>` works because its events come from the loop.
+      - `window.nativeHandle()` gives a `NativeWindow` that holds the record, and a copy is another hold;
+      - its handles stay valid for as long as it lives, for every consumer: a GPU surface, a GL context, a video
+        overlay;
+      - the count is kept in the C record, as webgpu.h's `AddRef` and `Release` are, and as kama's design has it ("the
+        seam keeping a C ref on the window"). The browser's model is the same: a `GPUCanvasContext` holds its `canvas`.
+
+      `NativeWindow` is a resource answering `kind()`, `display()`, `window()` and `isOpen()`. `NativeWindow.of` is
+      `unsafe ctor adopt(kind:, display:, window:)`, handles of a window made elsewhere, which holds nothing and is
+      always open, as `@kama/gpu`'s `Device.adopt` does.
+   2. **What a closed window does to a surface that still holds it.**
+      - **Dropping the `Window` closes the window as the user sees it, at once.** Its callbacks go, so the focus the
+        hide takes away reaches no one, and it is hidden.
+      - **Its GLFW window and HWND go with the record's last holder,** and GLFW with the last record that had one, so
+        a held window stays valid while another window closes.
+      - **A holder reads `isOpen()` as false.**
+      - **A surface on it (`@kama/gpu`'s GPU-2) never reaches the window again:** `acquire()` and `configure()` refuse
+        with a new `Closed`, `capabilities()` is refused, and a frame acquired before the close is dropped, never
+        presented.
+      - **Not `Lost`:** the package documents it as "configure again", and a configure would succeed on the hidden
+        window, so the loop would spin.
+      - **Not drawing on into the hidden window,** as a browser draws into a canvas taken out of the page: a closed
+        native window never comes back, and Android forbids touching one (4).
+   3. **The headless window and the web's canvas: one record and one count on every kind.**
+      - **Headless:** `nativeHandle()` holds the record with kind `None`, so every counting rule is tested with no
+        display, natively and under node.
+      - **The canvas (WIN-3):** its record keeps the selector's string, which `window()` points at, alive while held.
+        Closing removes the html5 callbacks and never the canvas, which is the page's. Question 2's refusals hold
+        there too.
+   4. **Android's `SurfaceLost`: the shape now, built with WIN-13.**
+      - **At `SurfaceLost`, which the program hands the window** (item 7), the window closes its current record.
+        That is question 2's state, so a surface the program failed to drop never touches the window.
+      - **At `SurfaceReady` the `Window` takes a new record.** A `Window` owns its current record, and a record, once
+        closed, stays closed.
+      - **kama's rule stands:** drop the surfaces in that call.
+
+      Read, not measured: Android's `ANativeWindow` is itself counted, and Vulkan's Android surface acquires it, so a
+      late release should be memory-safe. It is measured with WIN-13.
+
+   **Where it lives:**
+   - `csrc/winseam.c`: a record's `holds` and `closed`, `winseam_hold`, `winseam_release` and `winseam_closed`, and
+     `winseam_close` as close-then-release. Closing natively detaches the callbacks and hides the window; the GLFW
+     window and GLFW's count go at the last release;
+   - `src/window.kama`: `NativeWindow`;
+   - `tests/src/handles.kama`, with `winseam_live_records()` counting the records alive, and `tests/csrc/hooks.c`
+     asking Win32 whether an HWND is still a window and shown.
+
+   **Stopgap, in `tests/` alone: the tests open their system windows unfocused** (`tests/src/quiet.kama`, GLFW's
+   `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW` hints set before each open). A test run took the keyboard from whoever
+   was typing (the owner, 2026-11-10: "it fights for focus"). The probe also exited 127 at process end in 9 of 50
+   runs while its windows took the focus, and in none of 50 once they opened unfocused; the cause was not found. The
+   hook initialises GLFW outside the package's count, which masked one mutation until it was made faithful. **The
+   production answer is an open-time setting** (winit's `with_active`, GLFW's `GLFW_FOCUSED`), focused by default, so
+   the tests ask for an unfocused window through the API. It is the owner's to decide.
 7. **Missing: pointers other than a mouse (WIN-3, WIN-11), and Android (WIN-13)** (kama's review).
    - **Pointer events.** A phone, a tablet and a pen need touch and pen input as well as the mouse. **The production
      answer is W3C Pointer Events,** which the web half receives anyway: one stream for mouse, touch and pen, each

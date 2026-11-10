@@ -4,8 +4,8 @@ export {
     winseam_event,
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_MOUSE_MOVE, KIND_MOUSE_BUTTON, KIND_SCROLL, KIND_RESIZE,
     KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK, KIND_CLOSE_REQUESTED, KIND_DROPPED,
-    openWindow, headlessWindow, closeWindow, pumpWindow, nextEvent, postEvent, windowSize, framebufferSize,
-    windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
+    openWindow, headlessWindow, closeWindow, holdWindow, releaseWindow, windowClosed, pumpWindow, nextEvent, postEvent,
+    windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
 };
 
 extern "winseam.h";
@@ -40,6 +40,9 @@ extern fn UnsafePtr winseam_open(UnsafeConstPtr<cchar> title, int32 width, int32
                                  int32 capacity, UnsafePtr<int32> why_length);
 extern fn UnsafePtr winseam_headless(int32 width, int32 height);
 extern fn void winseam_close(UnsafePtr window);
+extern fn void winseam_hold(UnsafePtr window);
+extern fn void winseam_release(UnsafePtr window);
+extern fn int32 winseam_closed(UnsafePtr window);
 extern fn void winseam_pump(UnsafePtr window);
 extern fn int32 winseam_next(UnsafePtr window, UnsafePtr into);
 extern fn void winseam_post(UnsafePtr window, UnsafeConstPtr event);
@@ -59,6 +62,9 @@ unsafe fn UnsafePtr openWindow(UnsafeConstPtr<cchar> title, int32 width, int32 h
 }
 unsafe fn UnsafePtr headlessWindow(int32 width, int32 height) { return winseam_headless(width: width, height: height); }
 unsafe fn void closeWindow(UnsafePtr window) { winseam_close(window: window); }
+unsafe fn void holdWindow(UnsafePtr window) { winseam_hold(window: window); }
+unsafe fn void releaseWindow(UnsafePtr window) { winseam_release(window: window); }
+unsafe fn int32 windowClosed(UnsafePtr window) { return winseam_closed(window: window); }
 unsafe fn void pumpWindow(UnsafePtr window) { winseam_pump(window: window); }
 unsafe fn int32 nextEvent(UnsafePtr window, UnsafePtr into) { return winseam_next(window: window, into: into); }
 unsafe fn void postEvent(UnsafePtr window, UnsafeConstPtr event) { winseam_post(window: window, event: event); }

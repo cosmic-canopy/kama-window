@@ -19,6 +19,7 @@ import {
     window::native::KIND_RESIZE, window::native::KIND_SCALE_CHANGED, window::native::KIND_FOCUS,
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
+    window::native::holdWindow, window::native::releaseWindow, window::native::windowClosed,
     window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::windowSize,
     window::native::framebufferSize, window::native::windowScale, window::native::setCursor,
     window::native::nativeKind, window::native::nativeDisplay, window::native::nativeWindow,
@@ -90,14 +91,58 @@ type enum Event {
     Dropped(int32 count)                                       // the queue was full: this many events were lost
 }
 
-// What a GPU surface is made from. `kind` says which system's handles `display` and `window` are.
+// Whose handles a `NativeWindow` holds.
 type enum NativeKind { None, Win32, X11, Wayland, Cocoa, Canvas }
 
-@generate(of)
-type value NativeWindow {
-    public NativeKind kind;
-    public UnsafePtr display;   // HINSTANCE, Display*, wl_display*
-    public UnsafePtr window;    // HWND, X11 Window, wl_surface*, NSWindow*, the canvas selector's C string
+// What a GPU surface is made from: a window's system handles, `kind()` saying whose. It holds the window's native
+// record, so the handles stay valid for as long as it lives, after its `Window` has closed too; a copy is another hold.
+// The record, and the system window behind it, go with the last of the `Window` and its handles (AGENTS.window.md
+// item 6). Once the `Window` is dropped, `isOpen()` is false, and nothing should present to it again.
+type resource NativeWindow implements Copyable<This>(bare: give) {
+    NativeKind system;
+    UnsafePtr displayHandle;   // HINSTANCE, Display*, wl_display*
+    UnsafePtr windowHandle;    // HWND, X11 Window, wl_surface*, NSWindow*, the canvas selector's C string
+    UnsafePtr record;          // the window's record, held; null when adopted
+
+    friend Window::nativeHandle[fromRecord];
+
+    unsafe ctor fromRecord(UnsafePtr record, NativeKind kind, UnsafePtr display, UnsafePtr window) {
+        this.system = kind;
+        this.displayHandle = display;
+        this.windowHandle = window;
+        this.record = record;
+        holdWindow(window: record);
+    }
+
+    // The handles of a window made elsewhere. It holds nothing: whoever made the window keeps it alive while this
+    // lives, and it is always open.
+    public unsafe ctor adopt(NativeKind kind, UnsafePtr display, UnsafePtr window) {
+        this.system = kind;
+        this.displayHandle = display;
+        this.windowHandle = window;
+        this.record = null;
+    }
+
+    public unsafe ctor copy(ref NativeWindow source) {
+        this.system = source.system;
+        this.displayHandle = source.displayHandle;
+        this.windowHandle = source.windowHandle;
+        this.record = source.record;
+        if (this.record != null) { holdWindow(window: this.record); }
+    }
+
+    public const fn NativeKind kind() { return this.system; }
+    public unsafe const fn UnsafePtr display() { return this.displayHandle; }
+    public unsafe const fn UnsafePtr window() { return this.windowHandle; }
+
+    // False once the window's `Window` is dropped. The handles stay valid while this lives, but the window is closed:
+    // hidden, its events gone, never shown again.
+    public unsafe const fn bool isOpen() {
+        if (this.record == null) { return true; }
+        return windowClosed(window: this.record) == 0;
+    }
+
+    unsafe ~NativeWindow() { if (this.record != null) { releaseWindow(window: this.record); } }
 }
 
 unsafe fn Key keyOf(int32 hid) {
@@ -244,20 +289,22 @@ type resource Window {
         setCursor(window: this.seam, mode: m);
     }
 
-    // The system's handles, for a GPU surface. None for a headless window, and natively on Windows only so far.
+    // The system's handles, for a GPU surface, holding the window's record: valid while the handle lives, after this
+    // window is dropped too. Kind None for a headless window, and natively on Windows only so far.
     public unsafe const fn NativeWindow nativeHandle() {
+        if (this.seam == null) { return NativeWindow.adopt(kind: NativeKind::None, display: null, window: null); }
         NativeKind kind = NativeKind::None;
-        if (this.seam != null) {
-            int32 k = nativeKind(window: this.seam);
-            if (k == 1) { kind = NativeKind::Win32; }
-            if (k == 2) { kind = NativeKind::X11; }
-            if (k == 3) { kind = NativeKind::Wayland; }
-            if (k == 4) { kind = NativeKind::Cocoa; }
-            if (k == 5) { kind = NativeKind::Canvas; }
-        }
-        if (this.seam == null) { return NativeWindow.of(kind: kind, display: null, window: null); }
-        return NativeWindow.of(kind: kind, display: nativeDisplay(window: this.seam), window: nativeWindow(window: this.seam));
+        int32 k = nativeKind(window: this.seam);
+        if (k == 1) { kind = NativeKind::Win32; }
+        if (k == 2) { kind = NativeKind::X11; }
+        if (k == 3) { kind = NativeKind::Wayland; }
+        if (k == 4) { kind = NativeKind::Cocoa; }
+        if (k == 5) { kind = NativeKind::Canvas; }
+        return NativeWindow.fromRecord(record: this.seam, kind: kind, display: nativeDisplay(window: this.seam),
+                                       window: nativeWindow(window: this.seam));
     }
 
+    // Closes the window as the user sees it at once: hidden, its events gone. The system window itself goes with the
+    // last of this and the handles taken from it.
     unsafe ~Window() { closeWindow(window: this.seam); }
 }

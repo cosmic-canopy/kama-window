@@ -7,7 +7,7 @@ import {
     core::env::envOr,
     window::Window, window::WindowError, window::Event, window::Key, window::MouseButton, window::Mods,
     window::Size, window::NativeKind, window::NativeWindow,
-    keyTable,
+    keyTable, nativeHandles, systemHandles, unfocusedNext,
 };
 
 export { Tally };
@@ -106,21 +106,17 @@ unsafe fn void queueOrder(ref Tally t) {
         t.verdict(name: "a posted resize sets the size", why: "${after.width}×${after.height}");
     }
     NativeWindow n = w.nativeHandle();
-    bool none = match (n.kind) { case None: true; case Win32: false; case X11: false; case Wayland: false;
+    bool none = match (n.kind()) { case None: true; case Win32: false; case X11: false; case Wayland: false;
                                  case Cocoa: false; case Canvas: false; };
     if (none) { t.verdict(name: "a headless window has no native handle", why: ""); }
     else { t.verdict(name: "a headless window has no native handle", why: "it has one"); }
 }
 
-// The two plain values are made memberwise, by `of`, as kama names a memberwise ctor (its SPEC § Construction).
+// The plain value is made memberwise, by `of`, as kama names a memberwise ctor (its SPEC § Construction).
 unsafe fn void plainValues(ref Tally t) {
     Size s = Size.of(width: 3, height: 4);
     if (s.width == 3 && s.height == 4) { t.verdict(name: "Size.of takes its width, then its height", why: ""); }
     else { t.verdict(name: "Size.of takes its width, then its height", why: "the fields are ${s.width} and ${s.height}"); }
-    NativeWindow n = NativeWindow.of(kind: NativeKind::Canvas, display: null, window: null);
-    bool canvas = match (n.kind) { case Canvas: true; case _: false; };
-    if (canvas && n.display == null && n.window == null) { t.verdict(name: "NativeWindow.of takes a kind and two handles", why: ""); }
-    else { t.verdict(name: "NativeWindow.of takes a kind and two handles", why: "another kind, or a handle set"); }
 }
 
 // A full ring keeps what it holds and counts what followed in one Dropped(n), in order; then it takes events again.
@@ -196,6 +192,7 @@ unsafe fn void systemWindow(ref Tally t) {
 unsafe fn void systemWindow(ref Tally t) {
     string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
     if (!skip.isEmpty()) { println(s: "skip a system window (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    unfocusedNext();
     Result<Window, WindowError> opened = Window.open(title: "@kama/window test", width: 320, height: 200);
     match (give opened) {
         case Ok(value: w): {
@@ -210,7 +207,7 @@ unsafe fn void systemWindow(ref Tally t) {
                           why: "${s.width}×${s.height} logical, ${px.width}×${px.height} pixels, scale ${scale}");
             }
             NativeWindow n = w.nativeHandle();
-            bool has = n.window != null;
+            bool has = n.window() != null;
             if (has) { t.verdict(name: "a system window has a native handle", why: ""); }
             else { t.verdict(name: "a system window has a native handle", why: "none on this system yet"); }
         }
@@ -228,7 +225,9 @@ unsafe fn uint8 appMain() {
     queueDrops(t: t);
     queueDropsPartial(t: t);
     keyTable(t: t);
+    nativeHandles(t: t);
     systemWindow(t: t);
+    systemHandles(t: t);
     int32 runs = t.count();
     int32 failed = t.failed();
     println(s: "window tests: ${runs} cases, ${failed} failed");

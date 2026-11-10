@@ -113,7 +113,7 @@ built by kama on every native target, with GLFW's zlib notice beside it.
 
 kama's floor for a first publish is `tests/` green on every target the package claims, and `AGENTS.package.md` has the
 rest. Before it:
-- WIN-1 and WIN-2, which change the API;
+- WIN-2, which changes the API;
 - WIN-3, so the web is a claimed target that passes;
 - WIN-14.
 

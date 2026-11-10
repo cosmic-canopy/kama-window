@@ -29,10 +29,29 @@ struct winseam_window {
     int32_t have_last;
     double last_x;
     double last_y;
+    int32_t holds;    // the Window's own, and one for each NativeWindow on it: the record goes with the last
+    int32_t closed;   // the Window was dropped: hidden, no more events, while a handle still holds the record
 #ifndef __EMSCRIPTEN__
     GLFWwindow *glfw;
 #endif
 };
+
+// Records alive, for the tests: every window's, and each closed one a handle still holds.
+static int32_t g_live_records = 0;
+
+// A new record, held once, by its Window.
+static winseam_window *new_record(void) {
+    winseam_window *w = (winseam_window *)calloc(1, sizeof *w);
+    if (w == NULL) return NULL;
+    w->holds = 1;
+    g_live_records += 1;
+    return w;
+}
+
+static void free_record(winseam_window *w) {
+    free(w);
+    g_live_records -= 1;
+}
 
 static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
     if (text == NULL) text = "no reason given";
@@ -101,7 +120,7 @@ void winseam_post(winseam_window *w, const winseam_event *e) {
 }
 
 winseam_window *winseam_headless(int32_t width, int32_t height) {
-    winseam_window *w = (winseam_window *)calloc(1, sizeof *w);
+    winseam_window *w = new_record();
     if (w == NULL) return NULL;
     w->width = width; w->height = height;
     w->fb_width = width; w->fb_height = height;
@@ -279,7 +298,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, u
         return NULL;
     }
     g_glfw_users += 1;
-    winseam_window *w = (winseam_window *)calloc(1, sizeof *w);
+    winseam_window *w = new_record();
     if (w == NULL) {
         *why_length = copy_text("out of memory", why, capacity);
         g_glfw_users -= 1;
@@ -292,7 +311,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, u
         const char *description = NULL;
         glfwGetError(&description);
         *why_length = copy_text(description, why, capacity);
-        free(w);
+        free_record(w);
         g_glfw_users -= 1;
         if (g_glfw_users == 0) glfwTerminate();
         return NULL;
@@ -319,14 +338,31 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, u
     return w;
 }
 
-void winseam_close(winseam_window *w) {
-    if (w == NULL) return;
-    if (w->glfw != NULL) {
-        glfwDestroyWindow(w->glfw);
-        g_glfw_users -= 1;
-        if (g_glfw_users == 0) glfwTerminate();
-    }
-    free(w);
+// Closed as the user sees it: no callback fills the ring again, and the window is hidden. Its GLFW window and HWND stay
+// valid for whoever still holds the record (a GPU surface on it: a configure on a destroyed window aborts wgpu-native).
+// The callbacks go first, so the focus the hide takes away reaches no one.
+static void system_close(winseam_window *w) {
+    if (w->glfw == NULL) return;
+    glfwSetKeyCallback(w->glfw, NULL);
+    glfwSetCharCallback(w->glfw, NULL);
+    glfwSetMouseButtonCallback(w->glfw, NULL);
+    glfwSetCursorPosCallback(w->glfw, NULL);
+    glfwSetScrollCallback(w->glfw, NULL);
+    glfwSetWindowSizeCallback(w->glfw, NULL);
+    glfwSetFramebufferSizeCallback(w->glfw, NULL);
+    glfwSetWindowContentScaleCallback(w->glfw, NULL);
+    glfwSetWindowFocusCallback(w->glfw, NULL);
+    glfwSetWindowCloseCallback(w->glfw, NULL);
+    glfwHideWindow(w->glfw);
+}
+
+// The record's last holder is gone: the GLFW window goes, and GLFW with the last record that had one, so a closed
+// window still held keeps GLFW up under it.
+static void system_destroy(winseam_window *w) {
+    if (w->glfw == NULL) return;
+    glfwDestroyWindow(w->glfw);
+    g_glfw_users -= 1;
+    if (g_glfw_users == 0) glfwTerminate();
 }
 
 void winseam_pump(winseam_window *w) {
@@ -391,7 +427,8 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, u
     return NULL;
 }
 
-void winseam_close(winseam_window *w) { free(w); }
+static void system_close(winseam_window *w) { (void)w; }
+static void system_destroy(winseam_window *w) { (void)w; }
 void winseam_pump(winseam_window *w) { (void)w; }
 
 void winseam_set_cursor(winseam_window *w, int32_t mode) {
@@ -404,3 +441,30 @@ int32_t winseam_native_kind(winseam_window *w) { (void)w; return 0; }
 void *winseam_native_display(winseam_window *w) { (void)w; return NULL; }
 void *winseam_native_window(winseam_window *w) { (void)w; return NULL; }
 #endif
+
+// ---- the record's holders, on every leg -------------------------------------------------------------------------------
+
+void winseam_hold(winseam_window *w) {
+    if (w != NULL) w->holds += 1;
+}
+
+void winseam_release(winseam_window *w) {
+    if (w == NULL) return;
+    w->holds -= 1;
+    if (w->holds > 0) return;
+    system_destroy(w);
+    free_record(w);
+}
+
+void winseam_close(winseam_window *w) {
+    if (w == NULL) return;
+    if (!w->closed) {
+        w->closed = 1;
+        system_close(w);
+    }
+    winseam_release(w);
+}
+
+int32_t winseam_closed(winseam_window *w) { return w->closed; }
+
+int32_t winseam_live_records(void) { return g_live_records; }

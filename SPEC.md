@@ -5,8 +5,8 @@ tested. What comes next is [ROADMAP.md](ROADMAP.md), why the package departs fro
 [AGENTS.window.md](AGENTS.window.md), and its history is the git log and [CHANGELOG.md](CHANGELOG.md).
 
 **Where it stands** (2026-11-10, kama 0.9.911): a system window natively on Windows (GLFW 3.5.1, MSYS2's static
-build), and a headless window on every target. On the web, opening a window refuses until the web half is built. Not
-published.
+build), and a headless window on every target, each with a counted native record, so a GPU surface holds its window.
+On the web, opening a window refuses until the web half is built. Not published.
 
 ## Using it
 
@@ -31,8 +31,14 @@ Linux and macOS link a system `glfw`, untried.
 - **Keys are physical.** A `Key` is named as the DOM's `KeyboardEvent.code` names it and numbered by its USB HID usage
   id, whatever the layout. Typed text arrives separately, as `Text`.
 - **Positions and sizes are logical,** and `scale()` converts them to pixels.
-- **A window is not `Sendable`:** it lives on the thread that opened it, which GLFW requires. `glfwInit` and
-  `glfwTerminate` are counted across windows, so the last window closed terminates GLFW.
+- **A window's native record is counted:** its `Window` holds it, and so does each `NativeWindow` taken from it. The
+  record, and the system window behind it, go with the last of them, in either order, so a handle's display and window
+  stay valid while it lives.
+- **Dropping a `Window` closes it at once, as the user sees it:** natively it is hidden, and takes no more events.
+  Its GLFW window is destroyed with the record's last holder.
+- **A window is not `Sendable`, and neither is a `NativeWindow`:** they live on the thread that opened the window,
+  which GLFW requires. `glfwInit` and `glfwTerminate` are counted across records, so GLFW is terminated with the last
+  record that has a GLFW window, and a closed window still held keeps it up.
 
 ## Window
 
@@ -50,10 +56,10 @@ Linux and macOS link a system `glfw`, untried.
 - **`setCursor(mode:)`:** `CursorMode::Normal`, `Hidden` or `Locked` (hidden, with raw and unbounded motion). A
   `PointerLock` event says when a lock takes hold. **Losing the focus while locked gives the pointer back,** as a
   browser does on blur.
-- **`nativeHandle() -> NativeWindow`:** what a GPU surface is made from. A headless window answers
-  `NativeKind::None`. Natively only Win32's handles are answered so far.
-- **Dropping a window closes it.** A GPU surface made on it must be dropped first, since the window does not count
-  references yet.
+- **`nativeHandle() -> NativeWindow`:** what a GPU surface is made from, holding the window's record. A headless
+  window answers `NativeKind::None`. Natively only Win32's handles are answered so far.
+- **Dropping a window closes it:** hidden at once, natively, with no more events. A `NativeWindow` taken from it, or a
+  GPU surface holding one, keeps its system window valid until the last of them is dropped, and reads it as closed.
 
 ## Event
 
@@ -78,11 +84,19 @@ Linux and macOS link a system `glfw`, untried.
   F1 to F24, the keypad, the modifiers left and right, and the international keys. GLFW's key tokens translate through
   one table; a token the table does not map is `Key::Unknown`, and no two map to one `Key`.
 
+## NativeWindow
+
+A window's system handles, holding its native record. It is a resource, and `Copyable`: a copy is another hold.
+- **`kind() -> NativeKind`:** `None`, `Win32`, `X11`, `Wayland`, `Cocoa` or `Canvas`, saying whose handles
+  `display()` and `window()` are (the module or display, and the window: an HINSTANCE and an HWND on Win32).
+- **`isOpen()`:** false once the window's `Window` is dropped. The handles stay valid while the `NativeWindow` lives,
+  but nothing should present to the window again.
+- **`NativeWindow.adopt(kind:, display:, window:)`:** the handles of a window made elsewhere. It holds nothing, so its
+  maker keeps the window alive, and it is always open.
+
 ## Plain values
 
 - **`Size`:** `width` and `height`, made memberwise: `Size.of(width:, height:)`.
-- **`NativeWindow`:** `kind` (`NativeKind`: `None`, `Win32`, `X11`, `Wayland`, `Cocoa` or `Canvas`), and two handles,
-  `display` and `window`, whose meaning the kind says. Made memberwise: `NativeWindow.of(kind:, display:, window:)`.
 
 ## What each backend does that the others do not
 
@@ -94,7 +108,13 @@ Linux and macOS link a system `glfw`, untried.
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 38 cases. They cover the queue's order, coalescing and drops on
-  a headless window; the plain values; the GLFW key table swept through the externed translator (118 keys mapped, none
-  twice); and a system window, which is skipped when `KAMA_WINDOW_NO_DISPLAY` is set;
-- the same program under node: 22 cases, the headless ones, and a check that opening a window refuses.
+- `tests/`, one program, natively, debug and release: 56 cases. They cover:
+  - the queue's order, coalescing and drops on a headless window;
+  - the plain values;
+  - the GLFW key table, swept through the externed translator (118 keys mapped, none twice);
+  - the native record's count, read through the seam's `winseam_live_records()`: a handle outliving its window and
+    reading it as closed, copies, either drop order, and an adopted handle;
+  - a system window, and its handle outliving it, still a window and hidden, through Win32 hooks of the tests' own.
+    These are skipped when `KAMA_WINDOW_NO_DISPLAY` is set, and their windows open unfocused (AGENTS.window.md,
+    item 6);
+- the same program under node: 33 cases, the headless ones, and a check that opening a window refuses.

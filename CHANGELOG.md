@@ -5,6 +5,13 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Breaking: a window's native record is counted, and `NativeWindow` holds it** (WIN-1, 2026-11-10, kama 0.9.911;
+  AGENTS.window.md item 6).
+  - `NativeWindow` is a `Copyable` resource: `kind()`, `display()`, `window()` and `isOpen()` replace its public
+    fields, and `NativeWindow.adopt(kind:, display:, window:)` replaces `NativeWindow.of`.
+  - A handle keeps its window's system window valid after the `Window` is dropped, which now hides the window at once
+    and destroys it with the last handle, so a GPU surface holding one drops safely in either order.
+  - `tests/` gains 18 cases.
 - **Breaking:** the two plain values are made memberwise, by kama's rule (2026-11-10, kama 0.9.911, its SPEC
   § Construction, KR-367): `Size.make(width:, height:)` is `Size.of(…)`, and `NativeWindow.make(kind:, display:,
   window:)` is `NativeWindow.of(…)`, each written by `@generate(of)`. `Window.open` and `Window.headless` keep their

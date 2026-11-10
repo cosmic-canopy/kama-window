@@ -51,7 +51,19 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, u
 // A window with no system window behind it: its ring, its size and `post`. Never touches GLFW. NULL only when out of
 // memory.
 winseam_window *winseam_headless(int32_t width, int32_t height);
+
+// A record is counted: its Window holds it once, from open or headless, and each NativeWindow on it once more. It goes
+// with its last holder, in either order, so a handle's display and window stay valid while it lives.
+//
+// The Window's drop: the window closes as the user sees it at once (natively hidden, its callbacks gone), then the
+// Window's hold is released. The GLFW window, and GLFW with the last record that had one, go at the last release.
 void winseam_close(winseam_window *window);
+void winseam_hold(winseam_window *window);
+void winseam_release(winseam_window *window);
+// 1 once the window is closed: its Window dropped.
+int32_t winseam_closed(winseam_window *window);
+// Records alive in the process, for the tests.
+int32_t winseam_live_records(void);
 
 // Natively, take the system's pending events into every open window's ring. Headless or on the web, nothing.
 void winseam_pump(winseam_window *window);

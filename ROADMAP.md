@@ -15,11 +15,10 @@
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: the stopgaps that change the API
+## NOW: the last stopgap that changes the API
 
 | id | item | why |
 |---|---|---|
-| WIN-1 | **A window counts references to its native record**, so a GPU surface holds one (`@kama/gpu`'s GPU-2) and the two drop in either order | [AGENTS.window.md, item 6](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
 | WIN-2 | **Held keys and buttons are released on a focus change**: the window tracks what is held, and posts each up before `Focus`, either way, on every backend | [AGENTS.window.md, item 5](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
 
 ## NEXT: the web half, then gamepads

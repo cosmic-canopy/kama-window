@@ -1,0 +1,153 @@
+// A window's native handle holds its native record (WIN-1, AGENTS.window.md item 6): the record lives until the window
+// and every handle are dropped, in either order, and a handle outliving its window says the window is closed. The
+// headless cases need no display and run on every leg; the system ones are skipped when KAMA_WINDOW_NO_DISPLAY is set.
+
+import {
+    core::println,
+    core::env::envOr,
+    Tally, unfocusedNext,
+    window::Window, window::WindowError, window::NativeWindow, window::NativeKind,
+};
+export { nativeHandles, systemHandles };
+
+extern "winseam.h";
+extern "hooks.h";
+extern fn int32 winseam_live_records();
+extern fn int32 windowtests_is_window(UnsafePtr hwnd);
+extern fn int32 windowtests_is_visible(UnsafePtr hwnd);
+
+// The records alive in the seam: every open window's, and each closed one a handle still holds.
+unsafe fn int32 liveRecords() { return winseam_live_records(); }
+
+unsafe fn void expectLive(ref Tally t, const ref string name, int32 want) {
+    int32 got = liveRecords();
+    if (got == want) { t.verdict(name: name, why: ""); }
+    else { t.verdict(name: name, why: "${got} records alive, not ${want}"); }
+}
+
+// A handle whose headless window has been dropped on the way out.
+unsafe fn NativeWindow outlivingHeadless() {
+    Window w = Window.headless(width: 32, height: 32);
+    return w.nativeHandle();
+}
+
+// The last of two copies, the first dropped on the way out.
+unsafe fn NativeWindow lastCopy() {
+    NativeWindow first = outlivingHeadless();
+    NativeWindow second = copy first;
+    return give second;
+}
+
+unsafe fn bool openNow(const ref Window w) {
+    NativeWindow n = w.nativeHandle();
+    return n.isOpen();
+}
+
+unsafe fn void handleOutlivesWindow(ref Tally t, int32 before) {
+    NativeWindow n = outlivingHeadless();
+    if (n.isOpen()) { t.verdict(name: "a handle outlives its window, and says it is closed", why: "it says open"); }
+    else { t.verdict(name: "a handle outlives its window, and says it is closed", why: ""); }
+    expectLive(t: t, name: "a closed window's record lives while a handle holds it", want: before + 1);
+}
+
+unsafe fn void copiesHold(ref Tally t, int32 before) {
+    NativeWindow n = lastCopy();
+    expectLive(t: t, name: "a copy holds the record after the handle it was copied from is dropped", want: before + 1);
+    if (n.isOpen()) { t.verdict(name: "a copy of a closed window's handle says it is closed", why: "it says open"); }
+    else { t.verdict(name: "a copy of a closed window's handle says it is closed", why: ""); }
+}
+
+unsafe fn void handleFirst(ref Tally t, int32 before) {
+    Window w = Window.headless(width: 32, height: 32);
+    bool open = openNow(w: w);
+    if (open) { t.verdict(name: "a handle says its window is open while the window lives", why: ""); }
+    else { t.verdict(name: "a handle says its window is open while the window lives", why: "it says closed"); }
+    expectLive(t: t, name: "a handle dropped before its window leaves the window's record", want: before + 1);
+}
+
+unsafe fn void adopted(ref Tally t, int32 before) {
+    NativeWindow n = NativeWindow.adopt(kind: NativeKind::Canvas, display: null, window: null);
+    bool canvas = match (n.kind()) { case Canvas: true; case _: false; };
+    if (canvas && n.display() == null && n.window() == null) {
+        t.verdict(name: "an adopted handle answers the kind and handles it was given", why: "");
+    } else {
+        t.verdict(name: "an adopted handle answers the kind and handles it was given", why: "another kind, or a handle set");
+    }
+    if (n.isOpen()) { t.verdict(name: "an adopted handle is open: its maker keeps the window", why: ""); }
+    else { t.verdict(name: "an adopted handle is open: its maker keeps the window", why: "it says closed"); }
+    NativeWindow other = copy n;
+    expectLive(t: t, name: "an adopted handle and its copies hold no record", want: before);
+}
+
+unsafe fn void nativeHandles(ref Tally t) {
+    int32 before = liveRecords();
+    handleOutlivesWindow(t: t, before: before);
+    expectLive(t: t, name: "the last handle frees a closed window's record", want: before);
+    copiesHold(t: t, before: before);
+    expectLive(t: t, name: "the last copy frees the record", want: before);
+    handleFirst(t: t, before: before);
+    expectLive(t: t, name: "a window whose handles are gone frees its record when it drops", want: before);
+    adopted(t: t, before: before);
+}
+
+// A system window's handle, from a window dropped on the way out; None when no window opens.
+@compileFor(!ARCH_WASM32)
+unsafe fn Optional<NativeWindow> outlivingSystem() {
+    unfocusedNext();
+    Result<Window, WindowError> opened = Window.open(title: "@kama/window handle test", width: 160, height: 100);
+    Optional<NativeWindow> held = Optional::None;
+    match (give opened) {
+        case Ok(value: w): { w.pump(); NativeWindow n = w.nativeHandle(); held = Optional::Some(value: give n); }
+        case Err(error: e): { string why = e.message(); println(s: "info no window for the handle cases: ${why}"); }
+    };
+    return give held;
+}
+
+// Opens a second system window and closes it at once.
+@compileFor(!ARCH_WASM32)
+unsafe fn void openAndClose() {
+    unfocusedNext();
+    Result<Window, WindowError> opened = Window.open(title: "@kama/window second", width: 120, height: 80);
+    match (give opened) {
+        case Ok(value: w): { w.pump(); }
+        case Err(error: e): { }
+    };
+}
+
+@compileFor(ARCH_WASM32)
+unsafe fn void systemHandles(ref Tally t) { }
+
+// A system window closed while its handle lives: hidden at once, still a window until the handle goes, and a second
+// window's close meanwhile does not end GLFW under it. Win32 answers the questions; elsewhere they are skipped.
+@compileFor(!ARCH_WASM32)
+unsafe fn void systemHandles(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip the system window's handle (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    int32 before = liveRecords();
+    UnsafePtr hwnd = null;
+    Optional<NativeWindow> got = outlivingSystem();
+    match (give got) {
+        case None: { t.verdict(name: "a system window for the handle cases", why: "it would not open"); return; }
+        case Some(value: n): {
+            hwnd = n.window();
+            if (n.isOpen()) { t.verdict(name: "a closed system window's handle says it is closed", why: "it says open"); }
+            else { t.verdict(name: "a closed system window's handle says it is closed", why: ""); }
+            if (windowtests_is_window(hwnd: hwnd) < 0) { println(s: "skip the HWND questions: not on Windows"); return; }
+            int32 alive = windowtests_is_window(hwnd: hwnd);
+            if (alive == 1) { t.verdict(name: "a closed system window stays a window while its handle holds it", why: ""); }
+            else { t.verdict(name: "a closed system window stays a window while its handle holds it", why: "it was destroyed"); }
+            int32 shown = windowtests_is_visible(hwnd: hwnd);
+            if (shown == 0) { t.verdict(name: "a closed system window is hidden at once", why: ""); }
+            else { t.verdict(name: "a closed system window is hidden at once", why: "it is still shown"); }
+            openAndClose();
+            int32 still = windowtests_is_window(hwnd: hwnd);
+            if (still == 1) { t.verdict(name: "closing a second window meanwhile leaves the held one", why: ""); }
+            else { t.verdict(name: "closing a second window meanwhile leaves the held one", why: "it was destroyed"); }
+            expectLive(t: t, name: "a held system window's record lives", want: before + 1);
+        }
+    };
+    int32 gone = windowtests_is_window(hwnd: hwnd);
+    if (gone == 0) { t.verdict(name: "the last handle destroys the closed system window", why: ""); }
+    else { t.verdict(name: "the last handle destroys the closed system window", why: "it is still a window"); }
+    expectLive(t: t, name: "and frees its record", want: before);
+}
