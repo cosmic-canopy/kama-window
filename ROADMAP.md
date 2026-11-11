@@ -19,7 +19,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 
 | id | item | why |
 |---|---|---|
-| WIN-21 | **`sizedByPage` on a canvas the page does not size**, which grows each tick by the pixel ratio: investigated, then fixed | [detail](ROADMAP_DETAIL.md#page-sized-canvas) |
+| WIN-21 | **`sizedByPage` on a canvas the page does not size**, which grows each tick by the pixel ratio: decided 2026-11-11, `open` refuses a canvas the page sizes on neither axis | [detail](ROADMAP_DETAIL.md#page-sized-canvas) |
 | WIN-4 | **Gamepads**, on the web and natively, each held button and deflected axis released on a focus change, as keys and buttons are | [detail](ROADMAP_DETAIL.md#gamepads) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform

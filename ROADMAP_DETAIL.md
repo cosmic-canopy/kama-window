@@ -22,7 +22,26 @@ owner decided on 2026-11-11 that it is investigated first (GPU-3's question 3):
   a report is taken;
 - how winit, Bevy, Godot's web export, Unity's web template, three.js, Babylon.js, PlayCanvas and emscripten handle it.
 
-Its answer is asked before it is built, test-first, with a case at a pixel ratio other than 1.
+**Investigated on 2026-11-11** (kyoten's `.scratch/gpu3-web/FINDINGS.md`, its last section): each canvas driven by the
+window's rule at ratios of 1.5 and 1. A canvas with no CSS size, or with only `width`/`height` attributes, ran away to
+33,554,432 pixels in 29 writes; one in a parent sized by its children grew to 1240 × 618 and stopped; a fixed CSS size,
+a percentage of a sized parent, a flex or grid item, and `width: 100%` with `height: auto` (the pixels keep their
+aspect) each held. At a ratio of 1 nothing moved. Of eight engines and libraries surveyed (winit, Bevy, Godot, Unity,
+three.js, Babylon.js, PlayCanvas, emscripten), none detects the loop or refuses: those that pin the CSS size cannot
+loop, and those that let the page size the canvas document a CSS rule. wgpu with winit has the loop (learn-wgpu's
+26.0.1 note), and Unity's tracker has the attribute-only case.
+
+**Decided by the owner on 2026-11-11, as recommended** ("Is your recommendation for WIN-21 the production answer? if so
+yes"): **under `sizedByPage`, `open` refuses a canvas the page sizes on neither axis.** It changes the canvas's pixels
+once, reads the layout, and puts them back; when both width and height followed, it refuses with words naming the
+fix, as `WindowError`: the page gives the canvas no CSS size, so give it a width (and a height or an aspect ratio) in
+CSS, or leave `sizedByPage` off. One axis following is allowed, since a width with `height: auto` keeps the pixels'
+aspect (measured stable). Refusing at the mistake, on every screen, is the package's rule elsewhere; pinning the CSS
+size would override the page's later CSS, and a CSS rule alone hides at a ratio of 1. **What it costs:** a canvas whose
+CSS arrives after `open`, and `max-width` alone, are refused though they held; the page sizes the canvas before the
+program opens it. A page that removes the canvas's size after `open` is not caught by a check at `open`; a row of its
+own if it ever matters. Built test-first, with cases at a pixel ratio other than 1. The `aspect-ratio` canvas seen
+rewritten every other frame in the investigation is measured alone before it is called a bug.
 
 <a id="firefox"></a>
 ## WIN-18: the browser leg in Firefox

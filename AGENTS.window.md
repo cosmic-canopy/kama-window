@@ -34,8 +34,8 @@ window's native record counted, so a GPU surface holds it (WIN-1, built), a wind
 asked (WIN-16, built), the window keeps what is held and releases it on a focus change (WIN-2, built), and the web half
 with Pointer Events on every backend (WIN-3, built), and a window's pixel size through its handle (WIN-20, built, for
 `@kama/gpu`'s GPU-3). `tests/` runs natively, under node and in every headless browser present (a Chrome for Testing
-pinned under `~/browsers`, Edge). WIN-21, `sizedByPage` on a canvas the page does not size, is next, its question asked
-on 2026-11-11; then gamepads (WIN-4). `tools/test.sh` passes before every commit.
+pinned under `~/browsers`, Edge). WIN-21, `sizedByPage` on a canvas the page does not size, is next, decided on 2026-11-11
+(`open` refuses a canvas the page sizes on neither axis); then gamepads (WIN-4). `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
