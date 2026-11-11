@@ -1,0 +1,117 @@
+// A window opens with the focus unless its options say not (WIN-16). The tests themselves never take the focus (the
+// owner, 2026-11-10: "it fights for focus"): every window they show opens unfocused, and the cases that must see a window
+// that would take the focus see it hidden, through GLFW's FOCUS_ON_SHOW, which a hidden window keeps. A window shown only
+// after the hidden cases pass, so a package that ignores the option never shows one; and when the shown one takes the
+// foreground, the program shows no other.
+
+import {
+    core::println,
+    core::env::envOr,
+    Tally, quietly,
+    window::Window, window::WindowError, window::WindowOptions, window::NativeWindow,
+};
+export { openOptions, focusCases };
+
+extern "hooks.h";
+extern fn int32 windowtests_win32();
+extern fn int32 windowtests_is_visible(UnsafePtr hwnd);
+extern fn int32 windowtests_is_foreground(UnsafePtr hwnd);
+extern fn int32 windowtests_focus_on_show(UnsafePtr hwnd);
+extern fn void windowtests_shown_next(int32 shown);
+
+// The default options take the focus, as a game does at launch; the tests' own take none.
+fn void openOptions(ref Tally t) {
+    WindowOptions o = WindowOptions.make();
+    if (o.focused) { t.verdict(name: "a window takes the focus as it opens, by default", why: ""); }
+    else { t.verdict(name: "a window takes the focus as it opens, by default", why: "focused is false"); }
+    WindowOptions q = quietly();
+    if (!q.focused) { t.verdict(name: "the tests' windows open unfocused", why: ""); }
+    else { t.verdict(name: "the tests' windows open unfocused", why: "focused is true"); }
+}
+
+// On the web, until the html5 window is built, opening one with options refuses too.
+@compileFor(ARCH_WASM32)
+unsafe fn bool focusCases(ref Tally t) {
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window test", width: 320, height: 200,
+                                                         options: quietly());
+    match (give opened) {
+        case Ok(value: w): { t.verdict(name: "on the web, opening a window with options refuses (not built yet)", why: "it opened"); }
+        case Err(error: e): { t.verdict(name: "on the web, opening a window with options refuses (not built yet)", why: ""); }
+    };
+    return true;
+}
+
+// GLFW's FOCUS_ON_SHOW on `w`, which its open asked for: 1 when it would take the focus when shown.
+@compileFor(!ARCH_WASM32)
+unsafe fn int32 focusOnShow(const ref Window w) {
+    NativeWindow n = w.nativeHandle();
+    return windowtests_focus_on_show(hwnd: n.window());
+}
+
+// "" when `got` is `want`, as FOCUS_ON_SHOW.
+@compileFor(!ARCH_WASM32)
+fn string asked(int32 got, int32 want) {
+    if (got == want) { return ""; }
+    return "FOCUS_ON_SHOW is ${got}";
+}
+
+// False when the system windows the other cases show would take the focus, so the program shows none.
+@compileFor(!ARCH_WASM32)
+unsafe fn bool focusCases(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip the focus cases (KAMA_WINDOW_NO_DISPLAY is set)"); return true; }
+    if (windowtests_win32() != 1) { println(s: "skip the focus cases: only Win32 answers them"); return true; }
+
+    // Hidden: GLFW keeps a hint until it terminates, so the hidden one is set while a window keeps GLFW up, and unset
+    // before the last one goes.
+    windowtests_shown_next(shown: 0);
+    Result<Window, WindowError> first = Window.openWith(title: "@kama/window hidden", width: 120, height: 80,
+                                                        options: quietly());
+    Window unfocused = match (give first) {
+        case Ok(value: w): give w;
+        case Err(error: e): {
+            windowtests_shown_next(shown: 1);
+            string why = e.message();
+            t.verdict(name: "a window opened with focused false would not take the focus when shown", why: why);
+            return false;
+        }
+    };
+    string quietWhy = asked(got: focusOnShow(w: unfocused), want: 0);
+    t.verdict(name: "a window opened with focused false would not take the focus when shown", why: quietWhy);
+    Result<Window, WindowError> second = Window.open(title: "@kama/window hidden", width: 120, height: 80);
+    match (give second) {
+        case Ok(value: w): {
+            t.verdict(name: "a plain open after an unfocused one would take the focus: the option does not leak",
+                      why: asked(got: focusOnShow(w: w), want: 1));
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a plain open after an unfocused one would take the focus: the option does not leak", why: why);
+        }
+    };
+    windowtests_shown_next(shown: 1);
+    if (!quietWhy.isEmpty()) { println(s: "skip every shown window: each would take the focus"); return false; }
+
+    // Shown, unfocused: the foreground stays where it was.
+    Result<Window, WindowError> third = Window.openWith(title: "@kama/window unfocused", width: 120, height: 80,
+                                                        options: quietly());
+    match (give third) {
+        case Ok(value: w): {
+            w.pump();
+            NativeWindow n = w.nativeHandle();
+            UnsafePtr hwnd = n.window();
+            string why = "";
+            bool quiet = windowtests_is_foreground(hwnd: hwnd) == 0;
+            if (!quiet) { why = "it took the foreground"; }
+            else if (windowtests_is_visible(hwnd: hwnd) != 1) { why = "it is not shown"; }
+            t.verdict(name: "a window opened with focused false is shown without taking the foreground", why: why);
+            if (!quiet) { println(s: "skip every other shown window: each would take the focus"); }
+            return quiet;
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a window opened with focused false is shown without taking the foreground", why: why);
+            return true;
+        }
+    };
+}

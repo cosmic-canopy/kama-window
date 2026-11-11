@@ -5,7 +5,7 @@
 import {
     core::println,
     core::env::envOr,
-    Tally, unfocusedNext,
+    Tally, quietly,
     window::Window, window::WindowError, window::NativeWindow, window::NativeKind,
 };
 export { nativeHandles, systemHandles };
@@ -93,8 +93,8 @@ unsafe fn void nativeHandles(ref Tally t) {
 // A system window's handle, from a window dropped on the way out; None when no window opens.
 @compileFor(!ARCH_WASM32)
 unsafe fn Optional<NativeWindow> outlivingSystem() {
-    unfocusedNext();
-    Result<Window, WindowError> opened = Window.open(title: "@kama/window handle test", width: 160, height: 100);
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window handle test", width: 160, height: 100,
+                                                         options: quietly());
     Optional<NativeWindow> held = Optional::None;
     match (give opened) {
         case Ok(value: w): { w.pump(); NativeWindow n = w.nativeHandle(); held = Optional::Some(value: give n); }
@@ -106,8 +106,8 @@ unsafe fn Optional<NativeWindow> outlivingSystem() {
 // Opens a second system window and closes it at once.
 @compileFor(!ARCH_WASM32)
 unsafe fn void openAndClose() {
-    unfocusedNext();
-    Result<Window, WindowError> opened = Window.open(title: "@kama/window second", width: 120, height: 80);
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window second", width: 120, height: 80,
+                                                         options: quietly());
     match (give opened) {
         case Ok(value: w): { w.pump(); }
         case Err(error: e): { }

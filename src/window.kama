@@ -25,7 +25,7 @@ import {
     window::native::nativeKind, window::native::nativeDisplay, window::native::nativeWindow,
 };
 
-export { Window, WindowError, Event, Key, MouseButton, Mods, CursorMode, Size, NativeKind, NativeWindow };
+export { Window, WindowOptions, WindowError, Event, Key, MouseButton, Mods, CursorMode, Size, NativeKind, NativeWindow };
 
 type enum WindowError implements Error {
     Refused(string words);   // the system would not open the window, in its words
@@ -210,15 +210,33 @@ unsafe fn winseam_event recordOf(const ref Event event) {
     return e;
 }
 
+// How a system window opens (`Window.openWith`), each field public with its default, as kama's `std::net` options are:
+// - `focused`: the window takes the keyboard focus as it opens; true by default, since a game takes the focus at
+//   launch. False opens it behind whatever has the focus, as a tool's or a test's window should. Natively it is GLFW's
+//   `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW`; on the web a canvas takes the focus only when the page gives it.
+type value WindowOptions {
+    public bool focused = true;
+
+    public ctor make() { }
+}
+
 type resource Window {
     UnsafePtr seam;
 
-    // A system window, `width` × `height` logical, titled `title`.
+    // A system window, `width` × `height` logical, titled `title`, opened as `WindowOptions.make()` says: focused.
     public unsafe ctor Result<Window, WindowError> open(const ref string title, int32 width, int32 height) {
+        return Window.openWith(title: title, width: width, height: height, options: WindowOptions.make());
+    }
+
+    // A system window, `width` × `height` logical, titled `title`, opened as `options` say.
+    public unsafe ctor Result<Window, WindowError> openWith(const ref string title, int32 width, int32 height,
+                                                            const ref WindowOptions options) {
         InlineArray<uint8>#(512) why = [0; 512];
         int32 whyLength = 0;
-        UnsafePtr s = openWindow(title: title.cstr(), width: width, height: height, why: addr(of: why[0]),
-                                 capacity: 512, whyLength: addr(of: whyLength));
+        int32 focused = 0;
+        if (options.focused) { focused = 1; }
+        UnsafePtr s = openWindow(title: title.cstr(), width: width, height: height, focused: focused,
+                                 why: addr(of: why[0]), capacity: 512, whyLength: addr(of: whyLength));
         if (s == null) {
             DynamicArray<uint8> bytes = DynamicArray.empty();
             isize i = 0;

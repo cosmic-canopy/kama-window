@@ -15,11 +15,10 @@
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: a window opened without the focus, then the last stopgap that changes the API
+## NOW: the last stopgap that changes the API
 
 | id | item | why |
 |---|---|---|
-| WIN-16 | **A window opened without taking the focus**: `WindowOptions` (`focused`, true by default) and `Window.openWith(title:, width:, height:, options:)`, so the tests' own GLFW hints go | [detail](ROADMAP_DETAIL.md#open-options) |
 | WIN-2 | **Held keys and buttons are released on a focus change**: the window tracks what is held, and posts each up before `Focus`, either way, on every backend | [AGENTS.window.md, item 5](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
 
 ## NEXT: the web half, then gamepads

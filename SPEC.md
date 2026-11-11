@@ -43,7 +43,13 @@ Linux and macOS link a system `glfw`, untried.
 ## Window
 
 - **`Window.open(title:, width:, height:) -> Result<Window, WindowError>`:** a system window, `width` × `height`
-  logical. `WindowError::Refused(words)` gives the system's words when it will not open one. On the web it refuses.
+  logical, opened with the default options. `WindowError::Refused(words)` gives the system's words when it will not
+  open one. On the web it refuses.
+- **`Window.openWith(title:, width:, height:, options:)`** opens one as a `WindowOptions` says, named as kama names a
+  build plus its settings (`connectWith`). `WindowOptions.make()` gives the defaults, and its fields are public:
+  - `focused`, true by default: the window takes the keyboard focus as it opens, as a game should at launch. False
+    leaves the focus where it is, as a tool's or a test's window should; natively both of GLFW's focus hints are set
+    from it on every open, so one open's choice never leaks into the next.
 - **`Window.headless(width:, height:)`.**
 - **`pump()`** takes the system's pending events into the queue: natively, every open window's. Headless, nothing.
 - **`pollEvent() -> Optional<Event>`:** the oldest event, or `None` when the queue is empty.
@@ -108,13 +114,17 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 56 cases. They cover:
+- `tests/`, one program, natively, debug and release: 61 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - the plain values;
   - the GLFW key table, swept through the externed translator (118 keys mapped, none twice);
   - the native record's count, read through the seam's `winseam_live_records()`: a handle outliving its window and
     reading it as closed, copies, either drop order, and an adopted handle;
-  - a system window, and its handle outliving it, still a window and hidden, through Win32 hooks of the tests' own.
-    These are skipped when `KAMA_WINDOW_NO_DISPLAY` is set, and their windows open unfocused (AGENTS.window.md,
-    item 6);
-- the same program under node: 33 cases, the headless ones, and a check that opening a window refuses.
+  - a system window, and its handle outliving it, still a window and hidden, through Win32 hooks of the tests' own;
+  - the options: an unfocused window shown without taking the foreground, and, on hidden windows read through GLFW's
+    `FOCUS_ON_SHOW`, an unfocused open asking for no focus and a plain open after it asking for the focus again.
+
+  The system windows are skipped when `KAMA_WINDOW_NO_DISPLAY` is set. **A test run never takes the keyboard:** every
+  window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
+  the program shows no more once one has taken the foreground;
+- the same program under node: 36 cases, the headless ones, and checks that opening a window refuses.

@@ -288,8 +288,8 @@ static void on_close(GLFWwindow *g) {
     push_simple(of(g), WINSEAM_CLOSE_REQUESTED, 0, 0, 0);
 }
 
-winseam_window *winseam_open(const char *title, int32_t width, int32_t height, uint8_t *why, int32_t capacity,
-                             int32_t *why_length) {
+winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
+                             int32_t capacity, int32_t *why_length) {
     *why_length = 0;
     if (g_glfw_users == 0 && !glfwInit()) {
         const char *description = NULL;
@@ -306,6 +306,11 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, u
         return NULL;
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    // Both, both ways, on every open: GLFW keeps a hint until it terminates, so an unfocused open would otherwise leave
+    // the next one unfocused too. FOCUSED is what a window does as it opens; FOCUS_ON_SHOW, what it does when shown.
+    int focus = focused ? GLFW_TRUE : GLFW_FALSE;
+    glfwWindowHint(GLFW_FOCUSED, focus);
+    glfwWindowHint(GLFW_FOCUS_ON_SHOW, focus);
     w->glfw = glfwCreateWindow(width, height, title, NULL, NULL);
     if (w->glfw == NULL) {
         const char *description = NULL;
@@ -420,9 +425,9 @@ void *winseam_native_window(winseam_window *w) {
 
 int32_t winseam_glfw_key_to_hid(int32_t k) { (void)k; return 0; }
 
-winseam_window *winseam_open(const char *title, int32_t width, int32_t height, uint8_t *why, int32_t capacity,
-                             int32_t *why_length) {
-    (void)title; (void)width; (void)height;
+winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
+                             int32_t capacity, int32_t *why_length) {
+    (void)title; (void)width; (void)height; (void)focused;
     *why_length = copy_text("@kama/window has no web window yet: only a headless one", why, capacity);
     return NULL;
 }

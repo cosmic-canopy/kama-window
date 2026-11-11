@@ -5,6 +5,10 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **A window can open without taking the focus** (WIN-16, 2026-11-10, kama 0.9.911; AGENTS.window.md item 6):
+  `Window.openWith(title:, width:, height:, options:)` takes a `WindowOptions` (`WindowOptions.make()`, its fields
+  public), whose `focused` is true by default. `Window.open` is unchanged and takes the defaults. `tests/` opens every
+  window through it, in place of GLFW hints of its own, and gains 5 cases.
 - **Breaking: a window's native record is counted, and `NativeWindow` holds it** (WIN-1, 2026-11-10, kama 0.9.911;
   AGENTS.window.md item 6).
   - `NativeWindow` is a `Copyable` resource: `kind()`, `display()`, `window()` and `isOpen()` replace its public

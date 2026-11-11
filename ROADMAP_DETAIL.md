@@ -8,27 +8,6 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
-<a id="open-options"></a>
-## WIN-16: a window opened without taking the focus
-
-**Decided** (the owner, 2026-11-10: "yes b sounds better"), over a separate `Window.openUnfocused`: an options value,
-which fullscreen (WIN-8), resizing and a position will each add a field to. A test run had taken the keyboard from the
-owner as they typed (AGENTS.window.md item 6, the tests' stopgap). The shape is kama's own (its SPEC § Construction,
-KR-367, and `std::net`'s `ListenOptions` and `ConnectOptions`):
-
-- `WindowOptions` is a `type value` whose fields are public with their defaults, made by `WindowOptions.make()`;
-- `Window.openWith(title:, width:, height:, options:)` opens with one, as `TcpStream.connectWith` connects, and
-  `Window.open(title:, width:, height:)` stays, with the defaults;
-- its one field so far is `focused`, true by default, since a game takes the focus at launch (winit's `with_active`,
-  GLFW's `GLFW_FOCUSED`).
-
-Natively, every open sets GLFW's `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW` hints from its options, both ways, since GLFW
-keeps a hint until it terminates. On the web a canvas takes the focus only when the page gives it, so WIN-3 decides
-what `focused` asks of one. Headless, it asks nothing.
-
-Done: the tests open through `openWith` with `focused: false`, and `tests/src/quiet.kama` goes, here and in
-`@kama/gpu`; a test holds that an unfocused open does not leak into the next one.
-
 <a id="web-half"></a>
 ## WIN-3: the web half
 

@@ -30,8 +30,8 @@ file the agent's brief and the departures below, the record kama reads.
 
 **[SPEC.md](SPEC.md) is what the package is, and [ROADMAP.md](ROADMAP.md) what comes next.** In short (2026-11-10, kama
 0.9.911): a system window natively on Windows and a headless one on every target, and a window's native record counted,
-so a GPU surface holds it (WIN-1, built). The web half and gamepads are not built yet. WIN-16, a window opened
-without taking the focus, is next, then WIN-2, the last stopgap. `tools/test.sh` passes before every commit.
+so a GPU surface holds it (WIN-1, built), and a window opens without taking the focus when asked (WIN-16, built). The
+web half and gamepads are not built yet, and WIN-2, the last stopgap, is next. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -148,15 +148,30 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    - `tests/src/handles.kama`, with `winseam_live_records()` counting the records alive, and `tests/csrc/hooks.c`
      asking Win32 whether an HWND is still a window and shown.
 
-   **Stopgap, in `tests/` alone: the tests open their system windows unfocused** (`tests/src/quiet.kama`, GLFW's
-   `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW` hints set before each open). A test run took the keyboard from whoever
-   was typing (the owner, 2026-11-10: "it fights for focus"). The probe also exited 127 at process end in 9 of 50
+   **Stopgap, replaced on 2026-11-10 (WIN-16): the tests set GLFW's focus hints themselves before each open**
+   (`GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW`). A test run took the keyboard from whoever was typing (the owner, 2026-11-10: "it fights for focus"). The probe also exited 127 at process end in 9 of 50
    runs while its windows took the focus, and in none of 50 once they opened unfocused; the cause was not found. The
    hook initialises GLFW outside the package's count, which masked one mutation until it was made faithful. **The
    production answer is an open-time setting** (winit's `with_active`, GLFW's `GLFW_FOCUSED`), focused by default, so
    the tests ask for an unfocused window through the API. **Decided** (the owner, 2026-11-10: "yes b sounds better"):
-   an options value, `WindowOptions`, over a separate `Window.openUnfocused`. WIN-16 builds it, and the stopgap goes
-   with it.
+   an options value, `WindowOptions`, over a separate `Window.openUnfocused`.
+
+   **Built (WIN-16):**
+   - **The shape is kama's own** (its SPEC § Construction, KR-367; `std::net`'s `ListenOptions` and `connectWith`):
+     `Window.openWith(title:, width:, height:, options:)` beside an unchanged `Window.open`, and `WindowOptions` a
+     `type value` made by `make()`, its fields public with their defaults. Its one field so far is `focused`, true.
+   - **Natively every open sets both hints from it, both ways.** GLFW keeps a hint until it terminates, so setting them
+     only for an unfocused open would leave the next window unfocused too. At creation GLFW applies `GLFW_FOCUSED` to a
+     shown window; `GLFW_FOCUS_ON_SHOW` is the window's attribute for a later show (GLFW 3.4's source as FFD vendors
+     it, read).
+   - **The tests never take the focus, even when the package is wrong.** The cases that need a window that would take
+     the focus open it hidden and read its `FOCUS_ON_SHOW` from GLFW's own window property (`L"GLFW"`, in MSYS2's 3.5.1
+     library). A window is shown only after they pass, unfocused, and checked not to be the foreground; once one is,
+     the program shows no other. The suite reproduced the bug first with no window shown, and all 5 mutations were
+     caught the same way. A sixth, dropping only `GLFW_FOCUSED`, is not run: catching it means a window takes the
+     foreground once, and the foreground case holds it.
+   - `@kama/gpu`'s tests open through it too, and its `examples/clear` leaves the focus where it is under `--frames`.
+   - On the web, `focused` is WIN-3's: a canvas takes the focus only when the page gives it.
 7. **Missing: pointers other than a mouse (WIN-3, WIN-11), and Android (WIN-13)** (kama's review).
    - **Pointer events.** A phone, a tablet and a pen need touch and pen input as well as the mouse. **The production
      answer is W3C Pointer Events,** which the web half receives anyway: one stream for mouse, touch and pen, each

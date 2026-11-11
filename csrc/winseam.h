@@ -44,10 +44,11 @@ typedef struct winseam_event {
 
 typedef struct winseam_window winseam_window;
 
-// A window with a GLFW window behind it, `width` × `height` logical. NULL on failure, with the reason copied into `why`
-// (at most `capacity` bytes, UTF-8, not terminated) and its length in `*why_length`.
-winseam_window *winseam_open(const char *title, int32_t width, int32_t height, uint8_t *why, int32_t capacity,
-                             int32_t *why_length);
+// A window with a GLFW window behind it, `width` × `height` logical, taking the focus as it opens when `focused` is 1
+// and leaving it where it is when 0. NULL on failure, with the reason copied into `why` (at most `capacity` bytes,
+// UTF-8, not terminated) and its length in `*why_length`.
+winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
+                             int32_t capacity, int32_t *why_length);
 // A window with no system window behind it: its ring, its size and `post`. Never touches GLFW. NULL only when out of
 // memory.
 winseam_window *winseam_headless(int32_t width, int32_t height);
