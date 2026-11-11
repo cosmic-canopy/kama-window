@@ -83,7 +83,8 @@ Linux and macOS link a system `glfw`, untried. On the web the package links its 
   - **On the web, the page's `#canvas`,** emscripten's own name for a program's canvas. The canvas is the page's: the
     window never creates or removes one. It refuses, in these words, with no page (`no page: a window opens on a
     canvas, and this program is not running in a browser`), when nothing matches, when the element is not a canvas,
-    and when the canvas is already a window. The title is the page's, so `title` goes unused.
+    when the canvas is already a window, and, under `sizedByPage`, when the page does not size the canvas (below). The
+    title is the page's, so `title` goes unused.
   - At open the window sets the canvas's CSS size inline to `width` × `height` (unless `sizedByPage`), its backing
     store to the pixels, `touch-action: none`, and a `tabindex` of 0 when it has none; closing gives each back.
 - **`Window.openWith(title:, width:, height:, options:)`** opens one as a `WindowOptions` says, named as kama names a
@@ -92,9 +93,25 @@ Linux and macOS link a system `glfw`, untried. On the web the package links its 
     leaves the focus where it is, as a tool's or a test's window should; natively both of GLFW's focus hints are set
     from it on every open, so one open's choice never leaks into the next. On the web the canvas is focused, or left
     until the user clicks it. Either way opening posts no `Focus`.
-  - `sizedByPage`, false by default: on the web the page lays the canvas out, and `width` and `height` go unused. The
-    page must then give the canvas a CSS size: one with none is laid out at its pixel size, which the window sets from
-    the CSS size, so it would grow. Natively, nothing.
+  - `sizedByPage`, false by default: on the web the page lays the canvas out, and `width` and `height` go unused.
+    Natively, nothing.
+    - **The page must size the canvas on at least one axis, and `open` refuses one it sizes on neither** (WIN-21). A
+      canvas with no CSS size, or sized by its `width` and `height` attributes alone, is laid out at its pixel size,
+      and the window sets the pixels from the layout × the device pixel ratio, so above a ratio of 1 it would grow
+      each frame (to 33,554,432 pixels wide in 29 frames at 1.5, measured); one filling a parent sized by its children
+      grows too, then stops. At a ratio of 1 nothing moves, so the mistake would hide on many screens.
+    - **So, before touching anything of the canvas, `open` changes its pixels once, reads its layout, and puts them
+      back.** When both axes followed, it refuses, in these words: ``the page does not size `#game`: its layout follows
+      its pixels on both axes, so under sizedByPage it would grow each frame; give it a CSS width, and a height or an
+      aspect-ratio, or leave sizedByPage off``.
+    - **One axis following is allowed:** a CSS width with the height auto, or a height with the width auto, takes the
+      other axis from the pixels' aspect, which the window keeps, and it holds (measured in Chrome for Testing and Edge
+      157 at ratios of 1 and 1.5, and held by `tests/`). A `display: none` canvas follows neither and opens with no
+      area.
+    - **What it costs:** CSS that sizes the canvas only after `open` is refused, though the canvas would then have held,
+      so the page sizes its canvas before the program opens it; so is `max-width` alone. A page that removes the
+      canvas's size after `open` is not caught. The check's change clears what the page had drawn on the canvas, as the
+      window's own setting of the pixels does.
 - **`Window.openIn(canvas:, title:, width:, height:, options:)`** opens one as `openWith` does, on the web on the
   page's canvas that `canvas`, a CSS selector, names: which canvas is what the window is, so it is spelled, never
   defaulted. Several canvases are several windows, each with its own queue. Natively `canvas` goes unused, as the web
@@ -235,7 +252,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 - the same program under node: 103 cases, the headless ones, the DOM key table, and checks that opening a window
   refuses with no page.
 - the same program in every headless Chromium present (a Chrome for Testing pinned under `~/browsers`, Edge, Chrome;
-  `KAMA_BROWSER` names one), built for the web with its own page, `tests/web/shell.html`: 180 cases. Beside the headless ones (`tests/src/web.kama`):
+  `KAMA_BROWSER` names one), built for the web with its own page, `tests/web/shell.html`: 189 cases. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,
@@ -244,9 +261,14 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     pixels alone, a new CSS size); dispatched as DOM events, in-process;
   - `openIn`: its refusals, two canvases as two windows each with its own queue, a canvas's own tabindex kept, and a
     canvas the page lays out (`sizedByPage`);
+  - `sizedByPage` on canvases the page does not size (WIN-21): one with no CSS size, one sized by its attributes alone
+    and one filling a parent sized by its children, each refused in the words below and left with its pixels and
+    styles as they were, and still a window without `sizedByPage`; one sized by its width alone and one by its height
+    alone, each opened at its layout;
   - then, as an App between frames: a resize from the ResizeObserver, and the browser's own input on request (a
     click, keys, a key let go on the canvas after it was pressed in the field, a drag released outside the canvas, a
-    touch drag, pointer lock at a click, a locked move, Escape, and no lock after the browser gave it back). `tools/webtest.mjs` (node, no npm packages) serves it, runs the
+    touch drag, pointer lock at a click, a locked move, Escape, and no lock after the browser gave it back), with a
+    window on a canvas the page sizes on one axis open throughout, which must hold still (about 150 frames). `tools/webtest.mjs` (node, no npm packages) serves it, runs the
   browser over the DevTools protocol with a throwaway profile at a device scale of 1.5, and reads the console to the
   summary line, an abort, an exception or a time limit. A case that needs the browser's own behaviour asks the driver
   for trusted input (a click, a key, a touch) by printing a request. Skipped, and said so, with no browser, `emcc` or

@@ -321,6 +321,21 @@ mergeInto(LibraryManager.library, {
 
     // ---- sizes (decision 6) ---------------------------------------------------------------------------------------
 
+    // Which axes of the canvas's layout follow its pixels (WIN-21): the pixels changed once, by a step on each axis
+    // that also changes their aspect, the layout read, and the pixels put back. A canvas the page gives no CSS size is
+    // laid out at its pixel size, so under `sizedByPage`, where the pixels are set from the layout × the pixel ratio,
+    // it would grow each frame. One axis following holds: the page sizes the other, and the pixels keep their aspect.
+    follows: function (canvas) {
+      var w0 = canvas.width, h0 = canvas.height;
+      var a = canvas.getBoundingClientRect();
+      canvas.width = w0 + 37;
+      canvas.height = h0 + 23;
+      var b = canvas.getBoundingClientRect();
+      canvas.width = w0;
+      canvas.height = h0;
+      return { width: b.width !== a.width, height: b.height !== a.height };
+    },
+
     // The canvas's content box, its pixels from the CSS size and the device pixel ratio, and the backing store set to
     // them. `report` queues SIZES for the C side, which posts `Resize` and `ScaleChanged` for what changed.
     measure: function (win, report) {
@@ -369,8 +384,9 @@ mergeInto(LibraryManager.library, {
   // ---- what C calls ---------------------------------------------------------------------------------------------------
 
   // A window on the canvas `selector` names: its index, or -1 with no page (node), -2 when nothing matches, -3 when the
-  // element is not a canvas, -4 when the canvas is already a window. `sizes` gets the CSS width and height, rounded, and
-  // the pixel width and height; `scale` the device pixel ratio.
+  // element is not a canvas, -4 when the canvas is already a window, -5 under `sizedByPage` when the page sizes the
+  // canvas on neither axis (WIN-21), which is checked before anything of the canvas is touched. `sizes` gets the CSS
+  // width and height, rounded, and the pixel width and height; `scale` the device pixel ratio.
   winseam_web_open__deps: ['$WinSeam', '$UTF8ToString'],
   winseam_web_open: function (record, selector, width, height, focused, sizedByPage, sizes, scale) {
     if (typeof document === 'undefined') return -1;
@@ -379,6 +395,10 @@ mergeInto(LibraryManager.library, {
     if (!el) return -2;
     if (!(el instanceof HTMLCanvasElement)) return -3;
     if (WinSeam.canvases.has(el)) return -4;
+    if (sizedByPage !== 0) {
+      var f = WinSeam.follows(el);
+      if (f.width && f.height) return -5;
+    }
     var index = WinSeam.open(record, el, width, height, focused !== 0, sizedByPage !== 0);
     var s = WinSeam.windows[index].sized;
     HEAP32[sizes >> 2] = s.w;

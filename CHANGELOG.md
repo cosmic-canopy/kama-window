@@ -5,6 +5,13 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Under `WindowOptions.sizedByPage`, `open` refuses a canvas the page sizes on neither axis** (WIN-21, 2026-11-11,
+  kama 0.9.911). Such a canvas is laid out at its pixel size, and the window sets the pixels from the layout × the
+  device pixel ratio, so above a ratio of 1 it grew each frame. Before touching anything of the canvas, `open` changes
+  its pixels once, reads its layout, and puts them back, and refuses with `WindowError::Refused` in words naming the
+  fix when both axes followed. A canvas the page sizes on one axis still opens: its pixels' aspect gives the other,
+  and it holds. **Refused now, though it held before:** CSS that sizes the canvas only after `open`, and `max-width`
+  alone. `tests/` gains 9 cases in each browser, 189 in all.
 - **`NativeWindow.framebufferSize()`** (WIN-20, 2026-11-11, kama 0.9.911): the window's size in pixels through its
   handle, as `Window.framebufferSize()` gives it, so a GPU surface holding the handle configures at the window's size
   and the window stays the one writer of a canvas's pixels (`@kama/gpu`'s GPU-3, decision 2). 0 × 0 once the window is

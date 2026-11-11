@@ -733,7 +733,10 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
         if (index == -1) snprintf(words, sizeof words, "no page: a window opens on a canvas, and this program is not running in a browser");
         else if (index == -2) snprintf(words, sizeof words, "no element on the page matches `%s`", canvas);
         else if (index == -3) snprintf(words, sizeof words, "`%s` is not a canvas", canvas);
-        else snprintf(words, sizeof words, "`%s` is already a window", canvas);
+        else if (index == -4) snprintf(words, sizeof words, "`%s` is already a window", canvas);
+        else snprintf(words, sizeof words, "the page does not size `%s`: its layout follows its pixels on both axes, so "
+                      "under sizedByPage it would grow each frame; give it a CSS width, and a height or an aspect-ratio, "
+                      "or leave sizedByPage off", canvas);   // -5, WIN-21
         *why_length = copy_text(words, why, capacity);
         free(selector);
         free_record(w);

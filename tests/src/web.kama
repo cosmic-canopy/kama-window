@@ -82,6 +82,24 @@ unsafe fn string refusal(const ref string canvas) {
     };
 }
 
+// What opening on `canvas` with `sizedByPage` refuses with, or "it opened".
+unsafe fn string pagedRefusal(const ref string canvas) {
+    WindowOptions byPage = quietly();
+    byPage.sizedByPage = true;
+    Result<Window, WindowError> made = Window.openIn(canvas: canvas, title: "refused", width: 10, height: 10,
+                                                     options: byPage);
+    return match (give made) {
+        case Ok(value: w): "it opened";
+        case Err(error: e): e.message();
+    };
+}
+
+// The words `open` refuses with, under `sizedByPage`, a canvas the page sizes on neither axis (WIN-21).
+fn string unsized(const ref string sel) {
+    return "the page does not size `" + sel + "`: its layout follows its pixels on both axes, so under sizedByPage it " +
+           "would grow each frame; give it a CSS width, and a height or an aspect-ratio, or leave sizedByPage off";
+}
+
 unsafe fn void focusOn(const ref string sel) { windowtests_focus(sel: sel.cstr()); }
 unsafe fn bool active(const ref string sel) { return windowtests_active(sel: sel.cstr()) == 1; }
 unsafe fn bool styleIs(const ref string prop, const ref string value) {
@@ -96,11 +114,14 @@ unsafe fn void setStyle(const ref string prop, const ref string value) {
     string sel = "#canvas";
     windowtests_set_style(sel: sel.cstr(), prop: prop.cstr(), value: value.cstr());
 }
-unsafe fn Size backing() {
-    string sel = "#canvas";
+unsafe fn Size backingOf(const ref string sel) {
     Size s = Size.of(width: 0, height: 0);
     windowtests_backing(sel: sel.cstr(), width: addr(of: s.width), height: addr(of: s.height));
     return s;
+}
+unsafe fn Size backing() {
+    string sel = "#canvas";
+    return backingOf(sel: sel);
 }
 
 unsafe fn void check(ref Tally t, const ref string name, bool ok, const ref string why) {
@@ -498,6 +519,91 @@ unsafe fn void canvases(ref Tally t) {
     };
 }
 
+// WIN-21: under `sizedByPage`, `open` refuses a canvas the page sizes on neither axis, which would grow by the pixel
+// ratio each frame (kyoten's `.scratch/win21-sizing/FINDINGS.md`), and leaves it as it was. A canvas the page sizes on
+// one axis opens, its pixels' aspect giving the other, which holds.
+unsafe fn void pageSized(ref Tally t) {
+    string bareSel = "#bare";
+    string attrsSel = "#attrs";
+    string childSel = "#bychild";
+    string bareWords = pagedRefusal(canvas: bareSel);
+    check(t: t, name: "under sizedByPage, a canvas the page gives no CSS size is refused, in words naming the fix",
+          ok: bareWords == unsized(sel: bareSel), why: "it says `${bareWords}`");
+    string attrsWords = pagedRefusal(canvas: attrsSel);
+    check(t: t, name: "and so is one sized by its width and height attributes alone",
+          ok: attrsWords == unsized(sel: attrsSel), why: "it says `${attrsWords}`");
+    string childWords = pagedRefusal(canvas: childSel);
+    check(t: t, name: "and one filling a parent sized by its children",
+          ok: childWords == unsized(sel: childSel), why: "it says `${childWords}`");
+
+    Size bareBack = backingOf(sel: bareSel);
+    Size attrsBack = backingOf(sel: attrsSel);
+    Size childBack = backingOf(sel: childSel);
+    check(t: t, name: "a refused canvas keeps its pixels: what the check changed is put back",
+          ok: bareBack.width == 300 && bareBack.height == 150 && attrsBack.width == 320 && attrsBack.height == 200 &&
+              childBack.width == 300 && childBack.height == 150,
+          why: "#bare ${bareBack.width}×${bareBack.height}, #attrs ${attrsBack.width}×${attrsBack.height}, #bychild ${childBack.width}×${childBack.height}");
+    check(t: t, name: "and nothing else of it is touched: no inline size, touch-action or tabindex",
+          ok: styleOf(sel: bareSel, prop: "width", value: "") && styleOf(sel: bareSel, prop: "height", value: "") &&
+              styleOf(sel: bareSel, prop: "touchAction", value: "") &&
+              attrOf(sel: bareSel, name: "tabindex", value: "(none)") &&
+              styleOf(sel: attrsSel, prop: "touchAction", value: "") &&
+              attrOf(sel: attrsSel, name: "tabindex", value: "(none)"),
+          why: "something was set");
+
+    Result<Window, WindowError> sizedByWindow = Window.openIn(canvas: bareSel, title: "bare", width: 120, height: 60,
+                                                              options: quietly());
+    match (give sizedByWindow) {
+        case Ok(value: v): {
+            Window bw = give v;
+            Size bs = bw.size();
+            check(t: t, name: "a refused canvas can still be a window that sizes it: without sizedByPage it opens at its size",
+                  ok: bs.width == 120 && bs.height == 60, why: "${bs.width}×${bs.height}");
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a refused canvas can still be a window that sizes it: without sizedByPage it opens at its size",
+                      why: why);
+        }
+    };
+
+    WindowOptions byPage = quietly();
+    byPage.sizedByPage = true;
+    Result<Window, WindowError> wide = Window.openIn(canvas: "#widthonly", title: "width only", width: 999, height: 999,
+                                                     options: byPage);
+    match (give wide) {
+        case Ok(value: v): {
+            Window ww = give v;
+            Size ws = ww.size();
+            Size wp = ww.framebufferSize();
+            check(t: t, name: "under sizedByPage, a canvas the page sizes by its width alone opens, its pixels' aspect giving its height",
+                  ok: ws.width == 400 && ws.height == 200 && wp.width == 600 && wp.height == 300,
+                  why: "${ws.width}×${ws.height} logical, ${wp.width}×${wp.height} pixels");
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "under sizedByPage, a canvas the page sizes by its width alone opens, its pixels' aspect giving its height",
+                      why: why);
+        }
+    };
+    Result<Window, WindowError> tall = Window.openIn(canvas: "#heightonly", title: "height only", width: 999, height: 999,
+                                                     options: byPage);
+    match (give tall) {
+        case Ok(value: v): {
+            Window tw = give v;
+            Size ts = tw.size();
+            Size tp = tw.framebufferSize();
+            check(t: t, name: "and one it sizes by its height alone, its pixels' aspect giving its width",
+                  ok: ts.width == 600 && ts.height == 300 && tp.width == 900 && tp.height == 450,
+                  why: "${ts.width}×${ts.height} logical, ${tp.width}×${tp.height} pixels");
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "and one it sizes by its height alone, its pixels' aspect giving its width", why: why);
+        }
+    };
+}
+
 unsafe fn void webWindow(ref Tally t) {
     if (windowtests_in_browser() != 1) { noPage(t: t); return; }
     Result<Window, WindowError> made = Window.openWith(title: "ignored on the web", width: 320, height: 200,
@@ -517,24 +623,29 @@ unsafe fn void webWindow(ref Tally t) {
     cursor(t: t, w: w);
     closing(t: t, w: give w);
     canvases(t: t);
+    pageSized(t: t);
 }
 
 // ---- over the browser's own time and input ---------------------------------------------------------------------------
 
 // The trusted cases, one step a tick. A step checks what the last one's requests did, then makes its own: a request is
 // printed for tools/webtest.mjs, and the next step waits for it to be done and for a few frames more.
+// `steady` is a window on #widthonly under `sizedByPage`, open through every step: a canvas the page sizes on one axis
+// must hold still over the browser's frames (WIN-21).
 type resource WebRun implements App {
     Tally tally;
     Window window;
+    Window steady;
     int32 step = 0;
     int32 seq = 0;
     int32 awaited = 0;
     int32 settle = 0;
     int32 ticks = 0;
 
-    public ctor make(Tally tally, Window window) {
+    public ctor make(Tally tally, Window window, Window steady) {
         this.tally = give tally;
         this.window = give window;
+        this.steady = give steady;
     }
 
     public fn bool tick() { return this.next(); }
@@ -690,6 +801,17 @@ type resource WebRun implements App {
             string got = pumped(w: this.window);
             check(t: this.tally, name: "the browser giving the lock back sets the mode to Normal: the next click does not lock",
                   ok: !got.contains(substring: "PointerLock"), why: "got `${got}`");
+            string moved = pumped(w: this.steady);
+            Size ss = this.steady.size();
+            Size sp = this.steady.framebufferSize();
+            string sel = "#widthonly";
+            Size sb = backingOf(sel: sel);
+            int32 n = this.ticks;
+            println(s: "measured: the window on #widthonly, sized by the page on one axis, through ${n} ticks");
+            check(t: this.tally, name: "a window the page sizes on one axis holds still through the browser's frames: no Resize, the same size and pixels",
+                  ok: moved.isEmpty() && ss.width == 400 && ss.height == 200 && sp.width == 600 && sp.height == 300 &&
+                      sb.width == 600 && sb.height == 300,
+                  why: "posted `${moved}`, ${ss.width}×${ss.height} logical, ${sp.width}×${sp.height} pixels, backing ${sb.width}×${sb.height}");
             return this.done();
         }
         return this.done();
@@ -701,16 +823,27 @@ type resource WebRun implements App {
 unsafe fn uint8 webFinish(Tally t) {
     if (windowtests_in_browser() != 1) { return summary(t: t); }
     Result<Window, WindowError> made = Window.openWith(title: "web", width: 320, height: 200, options: quietly());
-    match (give made) {
-        case Ok(value: w): {
-            Owned<App> app = new WebRun.make(tally: give t, window: give w);
-            run(app: give app);
-            return 0;
-        }
+    Window opened = match (give made) {
+        case Ok(value: v): give v;
         case Err(error: e): {
             string why = e.message();
             t.verdict(name: "a window opens for the browser's steps", why: why);
             return summary(t: t);
         }
     };
+    WindowOptions byPage = quietly();
+    byPage.sizedByPage = true;
+    Result<Window, WindowError> held = Window.openIn(canvas: "#widthonly", title: "steady", width: 999, height: 999,
+                                                     options: byPage);
+    Window steady = match (give held) {
+        case Ok(value: v): give v;
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a window the page sizes on one axis opens for the browser's steps", why: why);
+            return summary(t: t);
+        }
+    };
+    Owned<App> app = new WebRun.make(tally: give t, window: give opened, steady: give steady);
+    run(app: give app);
+    return 0;
 }

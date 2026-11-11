@@ -10,7 +10,14 @@
   - #second, a second canvas with a tabindex of its own, which a window must keep;
   - #paged, a canvas the page lays out (200 × 100 CSS pixels), for a window that leaves its size to the page;
   - #field, a text field beside them, whose keys are the page's;
-  - #plain, an element that is not a canvas.
+  - #plain, an element that is not a canvas;
+  - the canvases WIN-21 tells apart, each a canvas a window leaving its size to the page would open on (kyoten's
+    `.scratch/win21-sizing/FINDINGS.md` measured each in both browsers):
+    - #bare, with no CSS size, and #attrs, sized by its `width` and `height` attributes alone: laid out at their
+      pixel size on both axes, so they would grow by the pixel ratio each frame;
+    - #bychild, 100% of a parent sized by its children: on both axes too, so it would grow, then stop;
+    - #widthonly, 100% of a box 400 px wide, height auto, and #heightonly, 100% of a box 300 px tall, width auto: the
+      page sizes one axis and the pixels' aspect the other, which holds.
   The program's output goes to the console, which the driver reads.
 -->
 <style>
@@ -22,6 +29,12 @@
   #panel { width: 200px; height: 100px; margin-top: 8px; }
   #paged { width: 100%; height: 100%; }
   #field { margin-top: 8px; }
+  #shrink { display: inline-block; }
+  #bychild { width: 100%; height: 100%; }
+  #widebox { width: 400px; }
+  #widthonly { width: 100%; }
+  #tallbox { height: 300px; }
+  #heightonly { height: 100%; }
 </style>
 </head>
 <body>
@@ -30,6 +43,11 @@
 <div id="panel"><canvas id="paged"></canvas></div>
 <input id="field" type="text">
 <div id="plain">not a canvas</div>
+<canvas id="bare"></canvas>
+<canvas id="attrs" width="320" height="200"></canvas>
+<div id="shrink"><canvas id="bychild"></canvas></div>
+<div id="widebox"><canvas id="widthonly"></canvas></div>
+<div id="tallbox"><canvas id="heightonly"></canvas></div>
 <script>
   var Module = {
     print: function (text) { console.log(text); },

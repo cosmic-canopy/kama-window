@@ -33,9 +33,9 @@ file the agent's brief and the departures below, the record kama reads.
 window's native record counted, so a GPU surface holds it (WIN-1, built), a window opens without taking the focus when
 asked (WIN-16, built), the window keeps what is held and releases it on a focus change (WIN-2, built), and the web half
 with Pointer Events on every backend (WIN-3, built), and a window's pixel size through its handle (WIN-20, built, for
-`@kama/gpu`'s GPU-3). `tests/` runs natively, under node and in every headless browser present (a Chrome for Testing
-pinned under `~/browsers`, Edge). WIN-21, `sizedByPage` on a canvas the page does not size, is next, decided on 2026-11-11
-(`open` refuses a canvas the page sizes on neither axis); then gamepads (WIN-4). `tools/test.sh` passes before every commit.
+`@kama/gpu`'s GPU-3), and under `sizedByPage` `open` refuses a canvas the page sizes on neither axis (WIN-21, built).
+`tests/` runs natively, under node and in every headless browser present (a Chrome for Testing pinned under
+`~/browsers`, Edge). Gamepads (WIN-4) are next. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -387,6 +387,47 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
       the canvas's pixel size from `devicePixelContentBoxSize`, or CSS size × scale where a browser lacks it (Safari).
       `size()` is the CSS size, `framebufferSize()` the pixels, `scale()` the device pixel ratio, and a change arrives
       as `Resize` (ResizeObserver) or `ScaleChanged` (`matchMedia`).
+
+      **Under `sizedByPage`, `open` refuses a canvas the page sizes on neither axis (WIN-21, built on 2026-11-11).**
+      - **Found** by `@kama/gpu`'s web leg (GPU-3): a canvas the page gives no CSS size is laid out at its pixel size,
+        so at a pixel ratio of 1.5 each report set the pixels to the layout × 1.5 and the layout followed. 450 × 225
+        became 5130 × 2570 in 6 ticks. At a ratio of 1 it holds still, so it hides on many machines.
+      - **Investigated** (kyoten's `.scratch/gpu3-web/FINDINGS.md`, its last section):
+        - **Runs away, or grows and stops:** a canvas with no CSS size, or with only `width`/`height` attributes, ran
+          away to 33,554,432 pixels in 29 writes; one in a parent sized by its children grew, then stopped.
+        - **Held:** a fixed CSS size, a percentage of a sized parent, a flex or grid item, and one axis with the
+          other auto.
+        - **None of eight engines and libraries detects it or refuses:** winit, Bevy, Godot, Unity, three.js,
+          Babylon.js, PlayCanvas and emscripten. Those that pin the CSS size cannot loop, and those that let the page
+          size the canvas document a CSS rule. wgpu with winit has the loop (learn-wgpu's 26.0.1 note), and Unity's
+          tracker has the attribute-only case.
+      - **Decided by the owner, as recommended:** "Is your recommendation for WIN-21 the production answer? if so yes".
+        - It refuses at the mistake, on every screen, which is the package's rule elsewhere.
+        - Pinning the CSS size would override the page's later CSS, and a CSS rule alone hides at a ratio of 1.
+        - **What it costs:** CSS that arrives after `open`, and `max-width` alone, are refused though they held. A
+          page that removes the size after `open` is not caught: a row of its own if it ever matters.
+      - **Measured before building** (kyoten's `.scratch/win21-sizing/FINDINGS.md`):
+        - Edge 157 matches Chrome for Testing 157 on every shape, and a canvas sized by its height alone (width auto)
+          holds as the width-only one does.
+        - **The `aspect-ratio` canvas the investigation saw rewritten 15 times in 30 frames is not a bug.** Alone it
+          holds, 1 write in 60 frames, in 48 runs: both browsers, ratios 1.25 to 2, fractional offsets, `16 / 9` and
+          `auto 16 / 9`, and 19 million pixels down the page. On the investigation's page the runaway above it moved
+          it every frame.
+      - **Built:** `js/winseam.js`'s `follows` changes the pixels once by +37 × +23, which also changes their aspect,
+        reads `getBoundingClientRect()`, and puts them back. `winseam_web_open` returns -5 when both axes followed,
+        before anything of the canvas is touched, and `winseam_open` gives the words (SPEC § Window).
+        - `tests/`: 9 new cases in each browser, 189 in all. 8 are in-process: the three shapes refused in the words,
+          their pixels and styles left as they were, a refused canvas still a window without `sizedByPage`, and the
+          two one-axis shapes opened at their layout. The ninth holds a one-axis window still over the trusted steps,
+          about 150 frames.
+        - **The mutations: 9 of 9 caught** in Chrome for Testing:
+          - the check removed;
+          - one axis refused (`&&` made `||`);
+          - the check made without `sizedByPage`;
+          - the pixels, or the height alone, not put back;
+          - the height compared as the width;
+          - a step of 0, or none on the height;
+          - -5 said as "already a window".
    7. **Pointer lock waits for a click.** On the web a program calls `setCursor(Locked)` from a tick, never in a
       gesture, so asking at once always fails. `setCursor(Locked)` records the wish, and the window asks for the lock
       in the next pointer down on the canvas, with raw motion (`unadjustedMovement`) where offered: the web's "click to
