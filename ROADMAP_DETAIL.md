@@ -8,6 +8,35 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
+<a id="native-size"></a>
+## WIN-20: a window's pixel size through its native handle
+
+`@kama/gpu`'s web leg measured two writers of a canvas's pixels (kyoten's `.scratch/gpu3-web/FINDINGS.md`, 2026-11-11):
+the window sets them from `devicePixelContentBoxSize` (item 8, decision 6), and emdawnwebgpu's surface configure wrote
+its own size into `canvas.width` and `height`, after which the window still reported its old framebuffer and posted no
+`Resize`. The owner decided on 2026-11-11 (`@kama/gpu`'s GPU-3, decision 2) that a surface's configure takes no size
+and reads its window's, so the window is the one writer, as WebGPU's canvas `configure()` takes none. A surface holds
+the window's `NativeWindow` ([AGENTS.window.md](AGENTS.window.md) item 6), not its `Window`, so the handle answers the size:
+`NativeWindow.framebufferSize()`, the same pixels `Window.framebufferSize()` gives, read from the counted record so it
+answers while any holder lives, and 0 × 0 once the window is closed. Done: the handle's answer equals the window's on
+every backend, through a resize, a scale change and a close, test-first.
+
+<a id="page-sized-canvas"></a>
+## WIN-21: `sizedByPage` on a canvas the page does not size
+
+Found by `@kama/gpu`'s web leg on 2026-11-11 (kyoten's `.scratch/gpu3-web/`, headless Edge 157 at a pixel ratio of
+1.5): a canvas the page gives no CSS size is laid out at its pixel size, so under `WindowOptions.sizedByPage` each
+report sets the pixels to the layout × 1.5 and the layout follows. With no surface on it, 450 × 225 became 5130 × 2570
+in 6 ticks; with one, 51912 × 25973 in 10. At a pixel ratio of 1 it holds still, so it hides on many machines. The
+owner decided on 2026-11-11 that it is investigated first (GPU-3's question 3):
+- which ways a page sizes a canvas loop, and which hold: a fixed CSS size, a percentage of a sized parent, a flex or
+  grid item, `aspect-ratio`, one axis only, a stylesheet that arrives after `open`;
+- whether `open` can tell them apart reliably and refuse with words naming the fix, or the loop must be broken where
+  a report is taken;
+- how winit, Bevy, Godot's web export, Unity's web template, three.js, Babylon.js, PlayCanvas and emscripten handle it.
+
+Its answer is asked before it is built, test-first, with a case at a pixel ratio other than 1.
+
 <a id="firefox"></a>
 ## WIN-18: the browser leg in Firefox
 

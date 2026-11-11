@@ -10,15 +10,17 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-20**
+**Next id: WIN-22**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: gamepads
+## NOW: what `@kama/gpu`'s web leg found, then gamepads
 
 | id | item | why |
 |---|---|---|
+| WIN-20 | **A window's pixel size through its native handle**, so a surface configures at the window's size and the window stays the one writer of a canvas's pixels (`@kama/gpu`'s GPU-3, decision 2) | [detail](ROADMAP_DETAIL.md#native-size) |
+| WIN-21 | **`sizedByPage` on a canvas the page does not size**, which grows each tick by the pixel ratio: investigated, then fixed | [detail](ROADMAP_DETAIL.md#page-sized-canvas) |
 | WIN-4 | **Gamepads**, on the web and natively, each held button and deflected axis released on a focus change, as keys and buttons are | [detail](ROADMAP_DETAIL.md#gamepads) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
