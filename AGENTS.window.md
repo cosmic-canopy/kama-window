@@ -282,13 +282,130 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    - **Pointer events.** A phone, a tablet and a pen need touch and pen input as well as the mouse. **The production
      answer is W3C Pointer Events,** which the web half receives anyway: one stream for mouse, touch and pen, each
      event carrying a pointer id, its type, buttons, pressure and tilt, with down, move, up and cancel. The mouse
-     events become pointer events of type mouse. They are designed with the web half (W2), since the browser's API is
-     the design's reference.
+     events become pointer events of type mouse. **Decided with the web half on 2026-11-11** (item 8, decision 2).
    - **Android.** `NativeKind` gains `Android` (an `ANativeWindow*`). The window wraps `std::app::android::window()`
      from `SurfaceReady` to `SurfaceLost`, reads input through `std::app::android::setInputHandler`, and turns the
      program's `FocusGained` and `FocusLost` into `Focus`. The program hands it those lifecycle events: `std::app` does
      not route them to packages behind its back. Rotation is not a lifecycle event; the size is read from the window.
      An undrawn Android window gets no touches (`NO_INPUT_CHANNEL`, measured by kama on the emulator).
+8. **Decided on 2026-11-11: the web half (WIN-3), a window on a canvas, and Pointer Events on every backend.** Being
+   built; how it was built goes at this item's end.
+
+   **Measured first, on 2026-11-11** (kyoten's `.scratch/win3-web/`): headless Edge 157 driven over the DevTools
+   protocol from node 24, with no npm packages, and the browser's own trusted input. A plain page was measured, and so
+   was a kama program built for the web (kama 0.9.911, emsdk 6.0.13) whose path dependency ships a JS library.
+   - **The harness.** `--dump-dom` returns at the page's load, before emscripten's `main` has run, so it cannot run a
+     test program. A DevTools-protocol driver can: it reads the console as it comes, sees an abort, and sends input
+     between ticks.
+   - **emsdk 6.0.13's `html5.h` has no Pointer Events, no ResizeObserver and no device-pixel-ratio change** (read). A
+     dependency's `jsLibraries` file links into the program, and a synthetic `dispatchEvent` reaches its listeners
+     synchronously.
+   - **A listener that calls into C after the program has quit aborts the page:** "native function called after
+     runtime exit". A queue in JS that C drains never calls into the program.
+   - **Keys go to the focused element.** With a text field focused the canvas gets none. A tab switch gives the canvas
+     `blur` before the window's, and no `keyup`; coming back gives the canvas its focus again. A click outside the
+     canvas blurs it, Tab leaves it unless its `keydown` is prevented, and preventing `pointerdown` stops a click from
+     focusing it.
+   - **Pointers.** The mouse is pointer 1, a pen 2, and each touch contact a new id, never reused. A second button
+     pressed while one is held arrives as a `pointermove` with `button` set (W3C's chorded buttons), not a
+     `pointerdown`. A pen's pressure, tilt and twist arrive as sent, and its barrel is button 2. Touch has implicit
+     capture and a contact size, and only the first contact is primary. Without `touch-action: none` a drag over a
+     scrollable page is taken by the browser: `pointercancel` after the first move.
+   - **Sizes.** At a scale of 1.5, `devicePixelContentBoxSize` gives exact device pixels (480 × 300 for 320 × 200). An
+     inline style beats the page's stylesheet. A canvas with no CSS size is laid out at its pixel size, so setting its
+     pixels to CSS size × scale grows it each time. A runtime change of the pixel ratio cannot be faithfully made
+     headless.
+   - **Pointer lock.** Refused outside a user gesture, granted inside a `pointerdown`. Escape releases it and the page
+     sees no Escape key. Asked again at once, it is refused (`SecurityError`); 1.5 s later it is granted. Edge accepts
+     `unadjustedMovement`. A tab switch releases it before the blur.
+
+   **Decided by the owner on 2026-11-11 (kyoten's twelfth session), each as recommended,** after the probe overturned
+   none of them:
+   1. **One JS library for every listener, pulled at `pump()`.** Every listener queues a record in JS, and `pump()`
+      drains the queue into the ring through `take()`, as GLFW's callbacks run inside `glfwPollEvents`. So `pump()`
+      takes the system's pending events on every backend, nothing calls into the program from outside (it cannot abort
+      after `quit`), and the held set's rules are the C ring's, one implementation. It is kama's own `std::net::web`
+      model ("no callbacks into wasm"); the owner: "Isn't this similar to how networking works?". The JS queue keeps
+      WIN-2's guarantees: moves coalesce in it as in the ring, an up is never dropped, and past a cap a drop is counted
+      and reported as `Dropped` where it happened.
+   2. **Pointer Events replace `MouseMove` and `MouseButton`, on every backend.**
+      1. **The cases:** `PointerMove(pointer, dx, dy)`, `PointerDown(pointer, button, mods)`, `PointerUp(pointer,
+         button, mods)`, `PointerCancel(pointer)`, `PointerEnter(pointer)` and `PointerLeave(pointer)`. A `Pointer` is
+         a plain value: `id`, `kind` (`Mouse`, `Touch` or `Pen`), `primary`, `x`, `y`, `buttons`, `pressure`, `tiltX`,
+         `tiltY`, `twist`, `width` and `height`. `Scroll` stays its own event, as a wheel is not a pointer event in the
+         W3C spec. Natively GLFW gives a mouse alone: kind `Mouse`, id 1 (the browser's mouse id), enter and leave from
+         its cursor-enter callback.
+      2. **Every button gets its own down and up.** The browser's chorded `pointermove` is translated, so a right press
+         while the left is held is a `PointerDown(button: Right)`, as GLFW and winit report it, and WIN-2's pairing
+         holds per button.
+      3. **Touch and pen contacts are held like buttons, and a focus change cancels them.** A held contact ends with
+         `PointerCancel`, not an up: the finger never lifted, so a tap must not fire, and a browser does the same when
+         it takes a pointer. Mouse buttons keep WIN-2's ups. The ring keeps room for each held contact's end, for up to
+         16 pointers held at once; a down beyond that is counted into the drop.
+      4. **Moves coalesce per pointer:** a move joins the newest unread record only when it is the same pointer's move.
+      5. **`PointerButton` replaces `MouseButton`:** `Left`, `Middle`, `Right`, `Back`, `Forward` and `Eraser`
+         numbered as the W3C's `button` is (0 to 5), then `Sixth`, `Seventh` and `Eighth`. A touch contact and a pen
+         tip report `Left`, a pen's barrel `Right`. GLFW's order (left, right, middle) is mapped at the seam.
+      6. **Not now: every high-rate sample** (`getCoalescedEvents`, a 240 Hz pen). The ring keeps the last position;
+         a drawing program that needs every sample has its own row (WIN-19).
+   3. **Which canvas.**
+      1. **The canvas is the page's.** Nothing matching the selector, an element that is not a canvas, or a canvas
+         already a window: `open` refuses, in those words. Several canvases are several windows, each with its own
+         queue. The window never creates or removes a canvas, and closing it detaches its listeners and gives back
+         what it set on the element. (winit creates a canvas when none is given, which puts the window in charge of
+         the page's layout.)
+      2. **`title` is ignored on the web.** The page owns its `<title>`, and a canvas may be one part of a page; FFD
+         ignores it too.
+
+      How a program names its canvas was found on the way and asked as question 11: a `type value` cannot hold a
+      `string` (kama 0.9.911), so the selector cannot be a public field of `WindowOptions`.
+   4. **Focus is the canvas's, not the page's.** Keys are heard on the canvas, so typing in a page's chat box beside the
+      game never moves the player; `Focus` follows the canvas's focus and blur, and a tab switch reaches the canvas too
+      (measured), so WIN-2's release runs. `focused: true` (the default) focuses the canvas at open, as a native window
+      takes the keys at launch; `false` leaves the focus where it is until the user clicks the canvas. A pointer down
+      focuses the canvas, done by the window since it prevents the default (5). A canvas with no `tabindex` gets 0, so
+      Tab can reach it; a page's own `tabindex` is kept. Clicking outside the canvas takes the keys away until the
+      user clicks back, as clicking another window does natively.
+   5. **While the canvas has the focus, the window takes:**
+      - **every key it names** (`Key::Unknown` passes): its default is prevented, Tab, F1 to F24, Space and the arrows
+        included, so Space does not scroll the page, Tab does not leave the game, F5 does not reload and Ctrl+S is the
+        game's. The browser keeps the few chords no page can take (Ctrl+W, Ctrl+T). With the default prevented, `Text`
+        is read from the `keydown`'s `key` (one printable character), as winit does; IME composition is WIN-5's;
+      - **`pointerdown`'s default,** so no text is selected and the canvas image is not dragged; the window focuses
+        the canvas itself;
+      - **the context menu and the wheel** over the canvas, so the right button is a game button and the page does not
+        scroll;
+      - **`touch-action: none`** on the canvas, so a touch neither pans nor zooms the page over it, given back at close.
+
+      No setting turns this off until a consumer needs one (winit has one). The cost: keyboard page zoom (Ctrl+plus)
+      does not work while the game has the focus; the browser menu's still does.
+   6. **`open` sets the canvas's CSS size inline to `width` × `height`,** as a native window opens at its size. A
+      `WindowOptions` field, `sizedByPage` (false by default), leaves the CSS size to the page, and `width` and
+      `height` go unused (Godot's web export asks the same, as its canvas resize policy). Either way the window sets
+      the canvas's pixel size from `devicePixelContentBoxSize`, or CSS size × scale where a browser lacks it (Safari).
+      `size()` is the CSS size, `framebufferSize()` the pixels, `scale()` the device pixel ratio, and a change arrives
+      as `Resize` (ResizeObserver) or `ScaleChanged` (`matchMedia`).
+   7. **Pointer lock waits for a click.** On the web a program calls `setCursor(Locked)` from a tick, never in a
+      gesture, so asking at once always fails. `setCursor(Locked)` records the wish, and the window asks for the lock
+      in the next pointer down on the canvas, with raw motion (`unadjustedMovement`) where offered: the web's "click to
+      play". `PointerLock(true)` arrives only when the lock takes. When the browser releases it (Escape, a tab switch),
+      `PointerLock(false)` arrives and the mode falls back to `Normal`, so the program asks again, as WIN-2 kept for a
+      focus loss natively. A refusal posts nothing, and the wish stands. On the web alone, Escape while locked is the
+      browser's.
+   8. **The web never posts `CloseRequested`.** A page's close or a navigation never waits for the program, and
+      `beforeunload` can only ask the browser to show its own prompt. Visibility stays `std::app`'s `Suspended`, and the
+      focus loss that comes with it releases what is held. A "leave site?" prompt for unsaved work would be its own
+      setting, later.
+   9. **`Scroll` carries its unit,** `ScrollUnit::Lines` or `ScrollUnit::Pixels`, as winit's `LineDelta` and
+      `PixelDelta` do. Nothing is guessed: GLFW's notches are lines, a browser's `deltaMode` says which, and a page's
+      worth becomes pixels of the canvas's height. FFD's division of pixels by 100 differs by browser and system.
+   10. **The gate runs `tests/` in a browser.**
+       1. A node driver in `tools/`, with no npm packages, serves the built test page, runs headless Edge with a
+          throwaway profile, and reads the console to the last line, an abort or a time limit. In-process cases dispatch
+          DOM events from the test program, the web's Win32 messages; the cases that need the browser's own behaviour
+          print a request, and the driver performs it as trusted input. The node leg stays, for the headless cases.
+       2. **Firefox is a row of its own before the first publish (WIN-18):** it dropped the DevTools protocol, so it
+          needs a WebDriver BiDi client and Firefox installed. Safari waits for a Mac (WIN-12).
 
 ## Where the truth is
 

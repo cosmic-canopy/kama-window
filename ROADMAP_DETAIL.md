@@ -11,32 +11,52 @@ same `Event`s and methods. Where a platform cannot, the SPEC says so for that pl
 <a id="web-half"></a>
 ## WIN-3: the web half
 
-Today `Window.open` refuses on the web. This row makes a window on a canvas.
+Today `Window.open` refuses on the web. This row makes a window on a canvas, and Pointer Events on every backend. Its
+questions were decided on 2026-11-11 ([AGENTS.window.md](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input)
+item 8), after a probe in headless Edge; question 11, how a program names its canvas, is open.
 
-- **It starts from friendly-fire-department's web platform header** (`gfx/src/platform/ffd_platform.h`): emscripten's
-  html5 callbacks on `#canvas` filling the same C ring as GLFW's callbacks do natively, so the queue's rules hold on
-  every backend unchanged.
-- **What it builds:**
-  - **keys:** `KeyboardEvent.code` to the HID id, one table, with its own test, as the GLFW table has
-    (`tests/src/keys_web.kama` is its empty place today);
-  - **text:** typed text as `Text`, apart from the keys, as natively; which DOM events it is read from is measured
-    against an IME's (WIN-5);
-  - **sizes:** the canvas's CSS size, its pixel size from the device pixel ratio, and a change of either as `Resize` or
-    `ScaleChanged`;
-  - **pointer lock:** requested on a gesture, `PointerLock` from `pointerlockchange`, and released on blur, as natively;
-  - **focus, and the close request:** from the page's focus and visibility;
-  - **held keys and buttons:** the html5 callbacks reach the ring through the same rules as GLFW's (AGENTS.window.md
-    item 5), so a blur releases what is held. What a browser sends around a focus change is measured here, not read:
-    a `keyup` for a key pressed before the page had the focus, and a held key's repeat after a focus gain as
-    `repeat: true`;
-  - **`nativeHandle()`:** `NativeKind::Canvas` with the canvas's selector, which `@kama/gpu` makes a surface from.
-- **Pointer Events** (AGENTS.window.md, item 7): one stream for mouse, touch and pen, each event with a pointer id, its
-  type, buttons, pressure and tilt, and down, move, up and cancel. The mouse's events become pointer events of type
-  mouse.
-  - **To ask when the row comes up:** how `Event` carries them, since replacing `MouseMove` and `MouseButton` changes
-    the API every consumer matches on, and the package is unpublished.
-- **Done:** `tests/` runs in a browser, the system-window case included. The web leg is a browser, not node, and
-  `@kama/gpu`'s GPU-3 can start.
+- **It starts from friendly-fire-department's web platform header** (`gfx/src/platform/ffd_platform.h`), but not its
+  html5 callbacks: emsdk's `html5.h` has no Pointer Events, ResizeObserver or pixel-ratio change. The package ships a
+  JS library (`jsLibraries`) whose listeners queue records that `pump()` drains into the C ring (decision 1), so the
+  ring's rules hold on every backend unchanged.
+- **What it builds, in order, each part test-first with a mutation pass:**
+  1. **Pointer Events on both backends** (decision 2): `PointerMove`, `PointerDown`, `PointerUp`, `PointerCancel`,
+     `PointerEnter` and `PointerLeave` carrying a `Pointer`; `PointerButton` for `MouseButton`; the held set keyed by
+     pointer, a focus change cancelling a held contact; moves coalescing per pointer; `Scroll` with its unit
+     (decision 9). GLFW's mouse becomes pointer 1, and the tests are ported.
+  2. **The browser leg** (decision 10): a node driver and a static server in `tools/`, a test shell page, and
+     `tools/test.sh` running `tests/` in headless Edge, proven on the headless cases before the web window exists.
+  3. **The web window:** `winseam.c`'s web half and the JS library. On a canvas named by question 11's answer:
+     - the refusals and the canvas left as found (decision 3);
+     - keys from `KeyboardEvent.code` through one table, with its own test (`tests/src/keys_web.kama`), `Text` from
+       the `keydown`'s `key`, and what the window prevents (decision 5);
+     - focus from the canvas's own focus and blur (decision 4), so a blur releases what is held. Two readings item 5
+       left open are measured here: the `keyup` of a key pressed before the canvas had the focus, and a repeat after a
+       focus gain;
+     - the CSS size, the pixel size and the scale, and their changes (decision 6);
+     - pointer lock on the next click (decision 7);
+     - pointer capture on a down, so a drag released outside the canvas still ends in its up, as a native window
+       captures the mouse;
+     - `nativeHandle()`: `NativeKind::Canvas` with the canvas's selector, which `@kama/gpu` makes a surface from.
+- **Done:** `tests/` runs in a browser, the canvas window's cases included, in-process and with trusted input. The
+  web leg is a browser as well as node, and `@kama/gpu`'s GPU-3 can start.
+
+<a id="firefox"></a>
+## WIN-18: the browser leg in Firefox
+
+The browser leg drives Chromium's engine over the DevTools protocol, which Firefox no longer speaks (decided with
+WIN-3, AGENTS.window.md item 8, decision 10). Firefox takes WebDriver BiDi: a client for it in `tools/`, with no npm
+packages, beside the DevTools one, and Firefox installed where the gate runs. It is due before the first publish,
+which needs every claimed target green; Safari waits for a Mac (WIN-12). What differs is measured, not assumed:
+Firefox reports a mouse wheel in lines, and its pointer lock and focus may order their events otherwise.
+
+<a id="pointer-samples"></a>
+## WIN-19: every pointer sample
+
+The ring keeps a move's last position and sums its motion (AGENTS.window.md item 8, decision 2.6), which a game and a
+UI need. A drawing program needs every sample of a 240 Hz pen: the web's `getCoalescedEvents()` and
+`getPredictedEvents()`, and natively each platform's high-rate input. How they reach a program without growing every
+move's record is this row's question.
 
 <a id="gamepads"></a>
 ## WIN-4: gamepads
@@ -145,6 +165,7 @@ built by kama on every native target, with GLFW's zlib notice beside it.
 kama's floor for a first publish is `tests/` green on every target the package claims, and `AGENTS.package.md` has the
 rest. Before it:
 - WIN-3, so the web is a claimed target that passes;
+- WIN-18, so the web is green in Firefox as well as Chromium;
 - WIN-14.
 
 It is published before `@kama/gpu`, which then depends on its version, so a consumer names one dependency. The README's

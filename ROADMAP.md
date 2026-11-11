@@ -10,7 +10,7 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-18**
+**Next id: WIN-20**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
@@ -19,7 +19,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 
 | id | item | why |
 |---|---|---|
-| WIN-3 | **The web half**: a window on a canvas, `KeyboardEvent.code` to HID, the device pixel ratio and its changes, pointer lock, and W3C Pointer Events for mouse, touch and pen | [detail](ROADMAP_DETAIL.md#web-half) |
+| WIN-3 | **The web half**: a window on a canvas, `KeyboardEvent.code` to HID, the device pixel ratio and its changes, pointer lock, and W3C Pointer Events for mouse, touch and pen on every backend | [detail](ROADMAP_DETAIL.md#web-half) |
 
 ## NEXT: gamepads
 
@@ -41,5 +41,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 | WIN-11 | **Touch and pen natively**, where GLFW gives only a mouse | [detail](ROADMAP_DETAIL.md#native-pointers) |
 | WIN-12 | **Linux and macOS**: X11, Wayland and Cocoa handles, run and tested there and on the Steam Deck | [detail](ROADMAP_DETAIL.md#desktop-platforms) |
 | WIN-13 | **Android**: the window from `std::app`'s `SurfaceReady` to `SurfaceLost`, its input, and focus from the lifecycle | [AGENTS.window.md, item 7](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
+| WIN-18 | **The browser leg in Firefox**, over WebDriver BiDi | [detail](ROADMAP_DETAIL.md#firefox) |
+| WIN-19 | **Every pointer sample**, for a drawing program: coalesced and predicted events, and high-rate input natively | [detail](ROADMAP_DETAIL.md#pointer-samples) |
 | WIN-14 | **GLFW vendored** in the package, in place of MSYS2's and the system's | [detail](ROADMAP_DETAIL.md#vendored-glfw) |
-| WIN-15 | **The first publish**, before `@kama/gpu`'s: `tests/` green on every target the package claims, the web included, the stopgaps gone, GLFW vendored | [detail](ROADMAP_DETAIL.md#publish) |
+| WIN-15 | **The first publish**, before `@kama/gpu`'s: `tests/` green on every target the package claims, the web in Chromium and Firefox, the stopgaps gone, GLFW vendored | [detail](ROADMAP_DETAIL.md#publish) |
