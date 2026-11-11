@@ -32,8 +32,10 @@ file the agent's brief and the departures below, the record kama reads.
 0.9.911): a system window natively on Windows, the page's canvas on the web, and a headless one on every target, and a
 window's native record counted, so a GPU surface holds it (WIN-1, built), a window opens without taking the focus when
 asked (WIN-16, built), the window keeps what is held and releases it on a focus change (WIN-2, built), and the web half
-with Pointer Events on every backend (WIN-3, built). `tests/` runs natively, under node and in headless Edge. Gamepads
-(WIN-4) are next. `tools/test.sh` passes before every commit.
+with Pointer Events on every backend (WIN-3, built), and a window's pixel size through its handle (WIN-20, built, for
+`@kama/gpu`'s GPU-3). `tests/` runs natively, under node and in every headless browser present (a Chrome for Testing
+pinned under `~/browsers`, Edge). WIN-21, `sizedByPage` on a canvas the page does not size, is next, its question asked
+on 2026-11-11; then gamepads (WIN-4). `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
