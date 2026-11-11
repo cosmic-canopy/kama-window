@@ -181,7 +181,16 @@ async function main(argv) {
 
     const { server, port } = await serve(dir);
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'kama-window-webtest-'));
-    const { cdp, proc } = await launch(browserPath, profile);
+    let launched;
+    try {
+        launched = await launch(browserPath, profile);
+    } catch (e) {
+        console.log(`webtest: ${e.message}`);
+        server.close();
+        try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e2) { }
+        return 1;
+    }
+    const { cdp, proc } = launched;
     let verdict = null;   // the exit status, once the run has ended
     let finish;
     const ended = new Promise(r => { finish = r; });
