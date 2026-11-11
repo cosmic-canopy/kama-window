@@ -69,6 +69,83 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
      `src/window.c`), so natively `Focus(false)` arrives before the key ups. A browser sends no `keyup` after `blur`.
    - **So the ring keeps the held set itself,** releases before posting `Focus`, and drops an up for a key it does not
      hold. GLFW's own releases then find nothing held, and every backend behaves the same way.
+
+   **Measured first, on 2026-11-10** (a C probe in kyoten's `.scratch/win2-focus/`, one process per case, over MSYS2's
+   static GLFW 3.5.1, the build this package links, whose source is not on this machine). Win32 messages were sent to a
+   hidden window's HWND, so GLFW's own window procedure ran its paths while the window never had or took the focus:
+   every case left it hidden and the foreground unchanged.
+
+   | sent to the hidden window | what GLFW 3.5.1 reports |
+   |---|---|
+   | W down, then `WM_KILLFOCUS` | a press; the focus callback (0); **then** its own release of W, mods 0 |
+   | W down, then `WM_SETFOCUS` | a press; the focus callback (1); nothing released |
+   | W up, never down | nothing: GLFW drops an up for a key it holds as released |
+   | W down twice, then up | a press, a **repeat**, a release |
+   | Shift and W down, then `WM_KILLFOCUS` | the focus callback, then W's release, then Shift's, both mods 0 (GLFW's token order) |
+   | Henkan down twice, Muhenkan down, `WM_KILLFOCUS`, Henkan up | each down a **press** of `GLFW_KEY_UNKNOWN` (−1), none released at the loss, and the up passed on |
+   | the left button down, then `WM_KILLFOCUS` | a press, the focus callback, a release; **GLFW's mouse capture is set on the window, and its focus release leaves it set** |
+   | the left button up with no down, then down twice, then up | all four passed on: GLFW filters no button |
+
+   Each matches what GLFW 3.4's `src/input.c` and `src/window.c` say (read in friendly-fire-department's vendored copy).
+   A mod bit cannot be sent this way: GLFW reads them from the thread's key state, which a sent message does not move,
+   so a sent Shift press reports mods 0.
+
+   **Decided by the owner on 2026-11-10 (kyoten's eleventh session), each as recommended,** after the probe overturned
+   none of them:
+   1. **One pairing rule, kept by the ring in C, so every backend has it.**
+      - An up for a key or button the window does not hold is dropped. A browser delivers the `keyup` of a key pressed
+        before the page had the focus (read, not run; WIN-3 measures it), and GLFW passes on a button's (measured).
+      - **The window says what a repeat is, not the backend.** A `KeyDown` for a key not held is a press
+        (`repeat: false`) and holds it, and one for a held key is a repeat. This is GLFW's own rule for keys
+        (`_glfwInputKey`), on every backend. A key held across a focus gain therefore comes back as a press, though a
+        browser may mark the system's repeat `repeat: true` (read, not run; WIN-3 measures it), so a consumer that
+        ignores repeats still sees it.
+      - A second down for a held button, with no up between, is dropped.
+      - So every up the consumer sees follows its down, and every down it sees is followed in time by its up.
+   2. **`Key::Unknown` is never held.** It names every key the table does not, so the window cannot pair its ups and
+      downs; GLFW reports each down of one as a press and releases none (measured). Its events pass through as the
+      backend sends them. The owner, on how one arises: kyoten will handle locale and localization, so the keys of
+      keyboards beyond the US layout are to be named (WIN-17).
+   3. **The release: held buttons first, then keys by ascending HID id, so the eight modifiers (224 to 231) go last;
+      then what the focus change undoes (`PointerLock(false)` on a loss while locked); then `Focus`.** The action goes
+      up before the modifier that chose it: an editor's Alt+drag ends as the orbit it began as, and S goes up before
+      Ctrl. **Each up carries the modifier bits of the keys still held after it,** as a browser's `keyup` reads had the
+      user let go in that order, and the lock bits (CapsLock, NumLock) as the last key or button event reported them,
+      so a release never flips a lock. GLFW's own releases carry 0, which would contradict the next event: W's up
+      would say Shift is not held, one event before Shift's own up. Asked on the way, and decided:
+      - **Several keyboards and mice on one machine are not pursued** (the owner: "we probably shouldn't worry about
+        multiple keyboards and mice if that isn't a thing the web could handle anyway. Controllers are the natural
+        split screen solve"). Every system merges them into one keyboard and one cursor; a browser cannot tell them
+        apart, and natively it would take each platform's raw device input.
+      - **Focus handling is not configurable.** The `Focus` events always arrive, and what a program does with them (a
+        pause screen, muting, running on for a networked game) is its own. The release of keys and buttons cannot be
+        turned off: once the focus is lost the system sends the window no more of their events, so keeping them held
+        could only leave them stuck. Unity's input package has that option (`BackgroundBehavior.IgnoreFocus`), and its
+        own issue tracker says keys held at the focus loss then keep their pressed state. Whether a program reads pads
+        while unfocused is a real choice, since a pad reports in the background: it is WIN-4's question.
+   4. **The ring keeps room for an up of everything held.** An event other than such an up goes in only while a slot
+      is left beyond one for each held key and button and the one for `Dropped`; otherwise it is counted into the drop.
+      An up of a held key or button is never dropped, whether the system sent it or the window made it. A down that
+      finds no room is counted into the drop and not held, so its later up is dropped too, and the key, if still held,
+      comes back as a press with its next repeat. `Focus` stays an ordinary event: under overflow it may be counted
+      into a `Dropped` after the ups, with the held state still right. `queueDrops` and `queueDropsPartial` fill the ring
+      with `Text`, which no rule touches, so their counts stand; a new case holds the reserve.
+   5. **A `post`ed event moves the held set,** as if the system had sent it, and a posted `Focus` releases first. So
+      the rules are tested headless on every leg, and a replayed stream is idempotent: its recorded ups release their
+      keys, and its `Focus` then finds nothing held.
+   6. **GLFW's own releases are dropped by rule 1,** in either order (measured above: after the callback). A case in
+      `tests/` holds it on a hidden system window through the same Win32 messages, keys only: a button down sets
+      GLFW's mouse capture on the window (measured), so buttons are held by the headless cases.
+   7. **`window.releaseHeld()`** posts the same ups as a focus change, in the same order with the same bits, and no
+      `Focus`: a program's own release, as the-mallow-man's remote-play guard makes when a tick comes long after the
+      last (`game/src/inputguard.kama`). One path in C serves both, headless too.
+
+   The owner also asked whether a window's made-up ups could leave a weird state. **They cannot leave a key stuck
+   down:** once the window releases a key, the system's own up for it is dropped, and its next down is a fresh press.
+   **What can happen is the reverse, briefly:** a key still physically held after a focus change reads as up until the
+   system repeats it or it is pressed again, and a mouse button, which never repeats, until it is pressed again. Asking
+   the system which keys are down at a focus gain is not done: a browser cannot, and the release on gain exists for a
+   remote desktop that drops key-ups, where the remote system itself still believes the key is down.
 6. **Built on 2026-11-10: a window counts references to its native record (WIN-1)** (kama 0.9.911), replacing the
    stopgap below. Natively on Windows (GLFW 3.5.1) and under node, test-first:
    - **18 new cases:** 12 headless on every leg, and 6 on a system window;

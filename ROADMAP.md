@@ -10,7 +10,7 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-17**
+**Next id: WIN-18**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
@@ -33,6 +33,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 | id | item | why |
 |---|---|---|
 | WIN-5 | **Text input with IME composition** | [detail](ROADMAP_DETAIL.md#ime) |
+| WIN-17 | **Keyboards beyond the US layout**: their extra keys named, and each key's label in the player's layout | [detail](ROADMAP_DETAIL.md#international-keys) |
 | WIN-6 | **The clipboard** | [detail](ROADMAP_DETAIL.md#clipboard) |
 | WIN-7 | **Cursor shapes** | [detail](ROADMAP_DETAIL.md#cursor-shapes) |
 | WIN-8 | **Fullscreen** | [detail](ROADMAP_DETAIL.md#fullscreen) |

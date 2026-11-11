@@ -41,8 +41,15 @@ Today `Window.open` refuses on the web. This row makes a window on a canvas.
 - **Natively,** GLFW's gamepad API: `glfwGetGamepadState`, with SDL's mapping database.
 - **To ask when the row comes up:**
   - whether pads come as events, in the one queue, or as state polled each frame, which is how both APIs give them;
-  - how a pad is identified across a disconnect.
-- **WIN-2's rule extends to pads:** on a focus change each held button and deflected axis is released.
+  - how a pad is identified across a disconnect;
+  - **whether a program reads pads while its window is unfocused** (the owner, 2026-11-10, deciding WIN-2). Unlike
+    keys, a pad reports in the background, so this is a real choice: a setting, where the release of keys and buttons
+    is not. Unity's input package resets by default only the devices that cannot run in the background. Unity also
+    says a Windows program must have the focus to receive a controller's input at all, which is measured here first.
+- **WIN-2's rule extends to pads:** on a focus change each held button and deflected axis is released. A pad's state is
+  read, not only sent, so a button still held after a focus gain comes back with the next read, not a repeat.
+- **Split screen is pads** (the owner, 2026-11-10: "Controllers are the natural split screen solve"). Several keyboards
+  and mice on one machine are not pursued, since a browser cannot tell them apart.
 
 <a id="ime"></a>
 ## WIN-5: text input with IME composition
@@ -50,6 +57,23 @@ Today `Window.open` refuses on the web. This row makes a window on a canvas.
 On the web, `compositionstart`, `compositionupdate` and `compositionend`, the composed text coming out as `Text`. A
 program says where the caret is, so the IME's window sits beside it. Natively, what GLFW gives for an IME's
 composition is to be measured before the design, and the platform's own API used where it gives none.
+
+<a id="international-keys"></a>
+## WIN-17: keyboards beyond the US layout
+
+The owner, 2026-11-10, deciding WIN-2: kyoten will handle locale and localization, so the package does too. Two parts:
+- **The keys of other keyboards, named.** Japanese, Korean and Brazilian keyboards have keys `Key` does not name yet:
+  Henkan, Muhenkan, Kana, Yen, the ABNT2 key, Lang1 and Lang2 (USB HID International1 to 5 and Lang1 to 9; the DOM's
+  `Convert`, `NonConvert`, `KanaMode`, `IntlYen`, `IntlRo`, `Lang1`, `Lang2`). Today each is `Key::Unknown`. GLFW has
+  no token for them and reports each as `GLFW_KEY_UNKNOWN` with its scancode (measured, WIN-2's probe), so natively
+  they are mapped by scancode, on each system. Media and launch keys sit on HID's consumer page, and whether `Key`
+  names them is this row's question.
+- **Each key's label in the player's layout,** for prompts and rebinding screens. `Key` names a position, so the key
+  in W's place is `KeyW` everywhere, and on AZERTY it reads "Z". The web's `navigator.keyboard.getLayoutMap()` gives
+  the label, in Chromium alone; GLFW's `glfwGetKeyName` gives it natively. A browser without the layout map, and a
+  label that changes with the layout, are this row's questions.
+
+Translating a program's own text is not this package's: in kyoten it is the engine's.
 
 <a id="clipboard"></a>
 ## WIN-6: the clipboard
