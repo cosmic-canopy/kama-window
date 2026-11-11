@@ -1,12 +1,14 @@
 // A window's native handle holds its native record (WIN-1, AGENTS.window.md item 6): the record lives until the window
-// and every handle are dropped, in either order, and a handle outliving its window says the window is closed. The
-// headless cases need no display and run on every leg; the system ones are skipped when KAMA_WINDOW_NO_DISPLAY is set.
+// and every handle are dropped, in either order, and a handle outliving its window says the window is closed. It answers
+// the window's pixel size (WIN-20), so a GPU surface holding it configures at the window's size: the same as the
+// window's own, and 0 × 0 once the window is closed or when it was made elsewhere. The headless cases need no display
+// and run on every leg; the system ones are skipped when KAMA_WINDOW_NO_DISPLAY is set.
 
 import {
     core::println,
     core::env::envOr,
     Tally, quietly,
-    window::Window, window::WindowError, window::NativeWindow, window::NativeKind,
+    window::Window, window::WindowError, window::NativeWindow, window::NativeKind, window::Size,
 };
 export { nativeHandles, systemHandles };
 
@@ -15,6 +17,18 @@ extern "hooks.h";
 extern fn int32 winseam_live_records();
 extern fn int32 windowtests_is_window(UnsafePtr hwnd);
 extern fn int32 windowtests_is_visible(UnsafePtr hwnd);
+extern fn int32 windowtests_resize(UnsafePtr hwnd, int32 width, int32 height);
+
+// "" when the handle's pixel size is `want`'s, else both.
+fn string sameSize(Size got, Size want) {
+    if (got.width == want.width && got.height == want.height) { return ""; }
+    return "the handle says ${got.width}×${got.height}, the window ${want.width}×${want.height}";
+}
+
+fn string noSize(Size got) {
+    if (got.width == 0 && got.height == 0) { return ""; }
+    return "it says ${got.width}×${got.height}";
+}
 
 // The records alive in the seam: every open window's, and each closed one a handle still holds.
 unsafe fn int32 liveRecords() { return winseam_live_records(); }
@@ -47,6 +61,7 @@ unsafe fn void handleOutlivesWindow(ref Tally t, int32 before) {
     NativeWindow n = outlivingHeadless();
     if (n.isOpen()) { t.verdict(name: "a handle outlives its window, and says it is closed", why: "it says open"); }
     else { t.verdict(name: "a handle outlives its window, and says it is closed", why: ""); }
+    t.verdict(name: "a closed window's handle has no pixel size", why: noSize(got: n.framebufferSize()));
     expectLive(t: t, name: "a closed window's record lives while a handle holds it", want: before + 1);
 }
 
@@ -65,6 +80,15 @@ unsafe fn void handleFirst(ref Tally t, int32 before) {
     expectLive(t: t, name: "a handle dropped before its window leaves the window's record", want: before + 1);
 }
 
+unsafe fn void openSize(ref Tally t) {
+    Window w = Window.headless(width: 48, height: 24);
+    NativeWindow n = w.nativeHandle();
+    Size px = w.framebufferSize();
+    string why = sameSize(got: n.framebufferSize(), want: px);
+    if (why.isEmpty() && (px.width == 0 || px.height == 0)) { why = "the window has no pixels"; }
+    t.verdict(name: "a handle answers its open window's pixel size, as the window does", why: why);
+}
+
 unsafe fn void adopted(ref Tally t, int32 before) {
     NativeWindow n = NativeWindow.adopt(kind: NativeKind::Canvas, display: null, window: null);
     bool canvas = match (n.kind()) { case Canvas: true; case _: false; };
@@ -75,6 +99,7 @@ unsafe fn void adopted(ref Tally t, int32 before) {
     }
     if (n.isOpen()) { t.verdict(name: "an adopted handle is open: its maker keeps the window", why: ""); }
     else { t.verdict(name: "an adopted handle is open: its maker keeps the window", why: "it says closed"); }
+    t.verdict(name: "an adopted handle has no pixel size: its maker knows it", why: noSize(got: n.framebufferSize()));
     NativeWindow other = copy n;
     expectLive(t: t, name: "an adopted handle and its copies hold no record", want: before);
 }
@@ -87,6 +112,7 @@ unsafe fn void nativeHandles(ref Tally t) {
     expectLive(t: t, name: "the last copy frees the record", want: before);
     handleFirst(t: t, before: before);
     expectLive(t: t, name: "a window whose handles are gone frees its record when it drops", want: before);
+    openSize(t: t);
     adopted(t: t, before: before);
 }
 
@@ -117,12 +143,41 @@ unsafe fn void openAndClose() {
 @compileFor(ARCH_WASM32)
 unsafe fn void systemHandles(ref Tally t) { }
 
+// A system window's pixel size through its handle, before and after the system resizes it.
+@compileFor(!ARCH_WASM32)
+unsafe fn void systemSize(ref Tally t) {
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window size test", width: 160, height: 100,
+                                                         options: quietly());
+    match (give opened) {
+        case Ok(value: w): {
+            w.pump();
+            NativeWindow n = w.nativeHandle();
+            Size first = w.framebufferSize();
+            t.verdict(name: "a system window's handle answers its pixel size, as the window does",
+                      why: sameSize(got: n.framebufferSize(), want: first));
+            if (windowtests_resize(hwnd: n.window(), width: 300, height: 220) < 0) {
+                println(s: "skip a system resize through the handle: not on Windows");
+                return;
+            }
+            w.pump();
+            Size later = w.framebufferSize();
+            string why = sameSize(got: n.framebufferSize(), want: later);
+            if (why.isEmpty() && later.width == first.width && later.height == first.height) {
+                why = "the window stayed ${first.width}×${first.height}";
+            }
+            t.verdict(name: "after the system resizes it, the handle answers the new pixel size", why: why);
+        }
+        case Err(error: e): { string why = e.message(); t.verdict(name: "a system window for the size cases", why: why); }
+    };
+}
+
 // A system window closed while its handle lives: hidden at once, still a window until the handle goes, and a second
 // window's close meanwhile does not end GLFW under it. Win32 answers the questions; elsewhere they are skipped.
 @compileFor(!ARCH_WASM32)
 unsafe fn void systemHandles(ref Tally t) {
     string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
     if (!skip.isEmpty()) { println(s: "skip the system window's handle (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    systemSize(t: t);
     int32 before = liveRecords();
     UnsafePtr hwnd = null;
     Optional<NativeWindow> got = outlivingSystem();
@@ -132,6 +187,7 @@ unsafe fn void systemHandles(ref Tally t) {
             hwnd = n.window();
             if (n.isOpen()) { t.verdict(name: "a closed system window's handle says it is closed", why: "it says open"); }
             else { t.verdict(name: "a closed system window's handle says it is closed", why: ""); }
+            t.verdict(name: "a closed system window's handle has no pixel size", why: noSize(got: n.framebufferSize()));
             if (windowtests_is_window(hwnd: hwnd) < 0) { println(s: "skip the HWND questions: not on Windows"); return; }
             int32 alive = windowtests_is_window(hwnd: hwnd);
             if (alive == 1) { t.verdict(name: "a closed system window stays a window while its handle holds it", why: ""); }

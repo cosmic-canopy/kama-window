@@ -31,6 +31,10 @@ int32_t windowtests_send_focus(void *hwnd, int32_t focused) {
     SendMessageW((HWND)hwnd, focused ? WM_SETFOCUS : WM_KILLFOCUS, 0, 0);
     return 1;
 }
+int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height) {
+    SetWindowPos((HWND)hwnd, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    return 1;
+}
 #else
 int32_t windowtests_is_window(void *hwnd) { (void)hwnd; return -1; }
 int32_t windowtests_is_visible(void *hwnd) { (void)hwnd; return -1; }
@@ -40,6 +44,7 @@ int32_t windowtests_focus_on_show(void *hwnd) { (void)hwnd; return -1; }
 void windowtests_shown_next(int32_t shown) { (void)shown; }
 int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up) { (void)hwnd; (void)vk; (void)up; return -1; }
 int32_t windowtests_send_focus(void *hwnd, int32_t focused) { (void)hwnd; (void)focused; return -1; }
+int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height) { (void)hwnd; (void)width; (void)height; return -1; }
 #endif
 
 int32_t windowtests_cstr_is(const void *p, const char *s) { return p != NULL && strcmp((const char *)p, s) == 0; }

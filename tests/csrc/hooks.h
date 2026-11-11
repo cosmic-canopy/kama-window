@@ -26,6 +26,9 @@ int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up);
 // Sends `hwnd` WM_SETFOCUS when `focused`, else WM_KILLFOCUS: GLFW's window procedure runs its focus path, while the
 // window neither takes nor gives up the real focus. 1 when sent; -1 off Windows.
 int32_t windowtests_send_focus(void *hwnd, int32_t focused);
+// Sets `hwnd`'s outer size to `width` × `height` without moving, raising or activating it: GLFW's window procedure takes
+// the WM_SIZE, and its framebuffer callback runs at the next pump. 1 when set; -1 off Windows.
+int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height);
 
 // 1 when the C string at `p` is `s`.
 int32_t windowtests_cstr_is(const void *p, const char *s);

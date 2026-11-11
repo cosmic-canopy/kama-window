@@ -2,11 +2,15 @@
 // the web with its own page, run in a headless Chromium (Edge or Chrome) driven over the DevTools protocol. node 22 or
 // later, for its built-in WebSocket; no npm packages.
 //
-//   node tools/webtest.mjs <dir> <page.html> [--timeout <seconds>]
-//   node tools/webtest.mjs --which        # the browser it would run, or exit 3 when there is none
+//   node tools/webtest.mjs <dir> <page.html> [--browser <path>] [--timeout <seconds>]
+//   node tools/webtest.mjs --list         # every browser the gate runs in, one a line, or exit 3 when there is none
+//
+// The browsers (kyoten's GPU-3, decision 5: pinned, and every one present): $KAMA_BROWSER alone when it is set;
+// otherwise the newest Chrome for Testing pinned under $KAMA_BROWSERS (default ~/browsers, its chrome-<version>/
+// folders), then Edge and Chrome as installed. Firefox speaks WebDriver BiDi, not the DevTools protocol (WIN-18).
 //
 // It serves <dir> on 127.0.0.1, opens <page.html> in a throwaway profile at a device scale of 1.5 (so pixel sizes are
-// not CSS sizes), and prints the page's console as it comes. The run ends at the program's summary line
+// not CSS sizes), and prints the browser's name and the page's console as it comes. The run ends at the program's summary line
 // ("window tests: N cases, M failed"), at an abort or an exception, or at the time limit; the exit status is 0 only for
 // a summary with no failures.
 //
@@ -29,8 +33,32 @@ import path from 'node:path';
 
 const SCALE = 1.5;
 
-function findBrowser() {
-    if (process.env.KAMA_WINDOW_BROWSER) return process.env.KAMA_WINDOW_BROWSER;
+// "157.0.8103.50" sorts after "157.0.812.1": compare each number.
+function newer(a, b) {
+    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+    }
+    return 0;
+}
+
+// The newest Chrome for Testing pinned under $KAMA_BROWSERS (~/browsers). Its headless shell has no WebGPU adapter
+// (measured 2026-11-11), so the full browser runs, headless.
+function pinned() {
+    const dir = process.env.KAMA_BROWSERS || path.join(os.homedir(), 'browsers');
+    if (!fs.existsSync(dir)) return [];
+    const inner = process.platform === 'win32' ? 'chrome-win64/chrome.exe'
+        : process.platform === 'darwin' ? 'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
+        : 'chrome-linux64/chrome';
+    const found = fs.readdirSync(dir)
+        .map(n => /^chrome-(\d+(?:\.\d+)+)$/.exec(n))
+        .filter(m => m && fs.existsSync(path.join(dir, m[0], inner)))
+        .sort((x, y) => newer(x[1], y[1]));
+    return found.length ? [path.join(dir, found[found.length - 1][0], inner)] : [];
+}
+
+// Edge and Chrome as installed, one of each.
+function installed() {
     const local = process.env.LOCALAPPDATA || '';
     const candidates = process.platform === 'win32' ? [
         'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
@@ -38,18 +66,32 @@ function findBrowser() {
         'C:/Program Files/Google/Chrome/Application/chrome.exe',
         path.join(local, 'Google/Chrome/Application/chrome.exe'),
     ] : process.platform === 'darwin' ? [
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
         '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-        '/Applications/Chromium.app/Contents/MacOS/Chromium',
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     ] : [];
-    for (const c of candidates) if (fs.existsSync(c)) return c;
-    if (process.platform !== 'win32') {
-        for (const name of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'microsoft-edge']) {
+    const out = [];
+    const seen = new Set();
+    for (const c of candidates) {
+        if (!fs.existsSync(c)) continue;
+        const kind = /edge/i.test(c) ? 'edge' : 'chrome';
+        if (seen.has(kind)) continue;
+        seen.add(kind);
+        out.push(c);
+    }
+    if (process.platform !== 'win32' && process.platform !== 'darwin') {
+        for (const name of ['microsoft-edge', 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+            const kind = /edge/.test(name) ? 'edge' : 'chrome';
+            if (seen.has(kind)) continue;
             const r = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
-            if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
+            if (r.status === 0 && r.stdout.trim()) { seen.add(kind); out.push(r.stdout.trim()); }
         }
     }
-    return null;
+    return out;
+}
+
+function browsers() {
+    if (process.env.KAMA_BROWSER) return [process.env.KAMA_BROWSER];
+    return [...pinned(), ...installed()];
 }
 
 const TYPES = {
@@ -121,19 +163,20 @@ async function launch(browser, profile) {
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function main(argv) {
-    if (argv[0] === '--which') {
-        const b = findBrowser();
-        if (!b) { console.error('webtest: no Chromium browser (set KAMA_WINDOW_BROWSER)'); return 3; }
-        console.log(b);
+    if (argv[0] === '--list') {
+        const found = browsers();
+        if (!found.length) { console.error('webtest: no Chromium browser (set KAMA_BROWSER, or pin one under ~/browsers)'); return 3; }
+        for (const b of found) console.log(b);
         return 0;
     }
     const [dir, page] = argv;
     let limit = 120;
     const ti = argv.indexOf('--timeout');
     if (ti >= 0) limit = Number(argv[ti + 1]);
-    if (!dir || !page) { console.error('usage: node tools/webtest.mjs <dir> <page.html> [--timeout <seconds>]'); return 2; }
-    const browserPath = findBrowser();
-    if (!browserPath) { console.error('webtest: no Chromium browser (set KAMA_WINDOW_BROWSER)'); return 3; }
+    const bi = argv.indexOf('--browser');
+    if (!dir || !page) { console.error('usage: node tools/webtest.mjs <dir> <page.html> [--browser <path>] [--timeout <seconds>]'); return 2; }
+    const browserPath = bi >= 0 ? argv[bi + 1] : browsers()[0];
+    if (!browserPath) { console.error('webtest: no Chromium browser (set KAMA_BROWSER, or pin one under ~/browsers)'); return 3; }
 
     const { server, port } = await serve(dir);
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'kama-window-webtest-'));
@@ -144,6 +187,8 @@ async function main(argv) {
     const end = (status, why) => { if (verdict === null) { verdict = status; if (why) console.log(why); finish(); } };
 
     try {
+        const version = await cdp.send('Browser.getVersion');
+        console.log(`webtest: ${version.product} (${browserPath})`);
         const { targetId } = await cdp.send('Target.createTarget', { url: 'about:blank' });
         const { sessionId } = await cdp.send('Target.attachToTarget', { targetId, flatten: true });
         const send = (method, params = {}) => cdp.send(method, params, sessionId);

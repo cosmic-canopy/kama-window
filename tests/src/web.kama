@@ -194,6 +194,9 @@ unsafe fn void openedCases(ref Tally t, ref Window w) {
     check(t: t, name: "a new device pixel ratio is a ScaleChanged and no Resize, the pixels following",
           ok: atTwo == "ScaleChanged 2" && two == 2.0 && twoPx.width == 640 && twoPx.height == 400 && twoCss.width == 320,
           why: "got `${atTwo}`, scale ${two}, ${twoPx.width}×${twoPx.height} pixels, ${twoCss.width} wide");
+    Size twoHandle = n.framebufferSize();
+    check(t: t, name: "the handle answers the pixels at the new ratio, as the window does",
+          ok: twoHandle.width == 640 && twoHandle.height == 400, why: "${twoHandle.width}×${twoHandle.height}");
     windowtests_report_sizes(sel: sel.cstr(), width: css, height: 200.0, fw: 481, fh: 301, scale: 2.0);
     w.pump();
     Size odd = w.framebufferSize();
@@ -201,6 +204,9 @@ unsafe fn void openedCases(ref Tally t, ref Window w) {
     check(t: t, name: "new pixels alone post nothing, and framebufferSize follows them",
           ok: pixelsOnly.isEmpty() && odd.width == 481 && odd.height == 301,
           why: "got `${pixelsOnly}`, ${odd.width}×${odd.height}");
+    Size oddHandle = n.framebufferSize();
+    check(t: t, name: "and so does the handle's", ok: oddHandle.width == 481 && oddHandle.height == 301,
+          why: "${oddHandle.width}×${oddHandle.height}");
     windowtests_report_sizes(sel: sel.cstr(), width: 330.4, height: 200.0, fw: 661, fh: 400, scale: 2.0);
     expectPumped(t: t, w: w, name: "a new CSS size is a Resize, rounded", want: "Resize 330 200");
     windowtests_report_sizes(sel: sel.cstr(), width: css, height: 200.0, fw: 480, fh: 300, scale: 1.5);

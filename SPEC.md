@@ -169,6 +169,9 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   `display()` and `window()` are (the module or display, and the window: an HINSTANCE and an HWND on Win32).
 - **`isOpen()`:** false once the window's `Window` is dropped. The handles stay valid while the `NativeWindow` lives,
   but nothing should present to the window again.
+- **`framebufferSize() -> Size`:** the window's size in pixels, as `Window.framebufferSize()` gives it, as of the last
+  `pump()`: what a GPU surface holding the handle configures at, so the window stays the one writer of a canvas's
+  pixels. 0 × 0 once the window is closed, and for an adopted handle.
 - **`NativeWindow.adopt(kind:, display:, window:)`:** the handles of a window made elsewhere. It holds nothing, so its
   maker keeps the window alive, and it is always open.
 
@@ -205,7 +208,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 134 cases. They cover:
+- `tests/`, one program, natively, debug and release: 140 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - what is held, on a headless window (`tests/src/held.kama`): the pairing of ups and downs, `Key::Unknown`, the
     release's order and bits, the room kept for ups in a full ring, a replayed stream, and `releaseHeld`;
@@ -219,7 +222,9 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - the GLFW key table, swept through the externed translator (118 keys mapped, none twice), and its button table;
   - the native record's count, read through the seam's `winseam_live_records()`: a handle outliving its window and
     reading it as closed, copies, either drop order, and an adopted handle;
-  - a system window, and its handle outliving it, still a window and hidden, through Win32 hooks of the tests' own;
+  - a handle's pixel size: the window's while it is open, 0 × 0 closed or adopted;
+  - a system window, and its handle outliving it, still a window and hidden, and its handle's pixel size through a
+    resize the system makes, through Win32 hooks of the tests' own;
   - the options: an unfocused window shown without taking the foreground, and, on hidden windows read through GLFW's
     `FOCUS_ON_SHOW`, an unfocused open asking for no focus and a plain open after it asking for the focus again, and
     `openIn` opening a system window, its canvas unused.
@@ -227,10 +232,10 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   The system windows are skipped when `KAMA_WINDOW_NO_DISPLAY` is set. **A test run never takes the keyboard:** every
   window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
   the program shows no more once one has taken the foreground;
-- the same program under node: 100 cases, the headless ones, the DOM key table, and checks that opening a window
+- the same program under node: 103 cases, the headless ones, the DOM key table, and checks that opening a window
   refuses with no page.
-- the same program in a headless Chromium (Edge or Chrome; `KAMA_WINDOW_BROWSER` names another), built for the web with
-  its own page, `tests/web/shell.html`: 175 cases. Beside the headless ones (`tests/src/web.kama`):
+- the same program in every headless Chromium present (a Chrome for Testing pinned under `~/browsers`, Edge, Chrome;
+  `KAMA_BROWSER` names one), built for the web with its own page, `tests/web/shell.html`: 180 cases. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,

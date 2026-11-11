@@ -62,16 +62,16 @@ fi
 step "browser leg, headless Chromium"
 if ! command -v emcc >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     echo "skip no emcc or node on PATH (run from an interactive UCRT64 shell, bash -lic)"
-elif ! browser="$(node tools/webtest.mjs --which 2>/dev/null)"; then
-    echo "skip no Chromium browser (Edge or Chrome; KAMA_WINDOW_BROWSER names one)"
+elif ! browsers="$(node tools/webtest.mjs --list 2>/dev/null)"; then
+    echo "skip no Chromium browser (pin Chrome for Testing under ~/browsers, or set KAMA_BROWSER)"
+elif "$KAMA" build tests/kama.json --target WASM -o tests/out/web/windowtests.html > tests/out/build-web.log 2>&1; then
+    while IFS= read -r browser; do
+        echo "-- $browser"
+        node tools/webtest.mjs tests/out/web windowtests.html --browser "$browser" || failed=1
+    done <<< "$browsers"
 else
-    echo "browser: $browser"
-    if "$KAMA" build tests/kama.json --target WASM -o tests/out/web/windowtests.html > tests/out/build-web.log 2>&1; then
-        node tools/webtest.mjs tests/out/web windowtests.html || failed=1
-    else
-        tail -20 tests/out/build-web.log
-        failed=1
-    fi
+    tail -20 tests/out/build-web.log
+    failed=1
 fi
 
 echo

@@ -8,19 +8,6 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
-<a id="native-size"></a>
-## WIN-20: a window's pixel size through its native handle
-
-`@kama/gpu`'s web leg measured two writers of a canvas's pixels (kyoten's `.scratch/gpu3-web/FINDINGS.md`, 2026-11-11):
-the window sets them from `devicePixelContentBoxSize` (item 8, decision 6), and emdawnwebgpu's surface configure wrote
-its own size into `canvas.width` and `height`, after which the window still reported its old framebuffer and posted no
-`Resize`. The owner decided on 2026-11-11 (`@kama/gpu`'s GPU-3, decision 2) that a surface's configure takes no size
-and reads its window's, so the window is the one writer, as WebGPU's canvas `configure()` takes none. A surface holds
-the window's `NativeWindow` ([AGENTS.window.md](AGENTS.window.md) item 6), not its `Window`, so the handle answers the size:
-`NativeWindow.framebufferSize()`, the same pixels `Window.framebufferSize()` gives, read from the counted record so it
-answers while any holder lives, and 0 × 0 once the window is closed. Done: the handle's answer equals the window's on
-every backend, through a resize, a scale change and a close, test-first.
-
 <a id="page-sized-canvas"></a>
 ## WIN-21: `sizedByPage` on a canvas the page does not size
 

@@ -208,6 +208,16 @@ type resource NativeWindow implements Copyable<This>(bare: give) {
         return windowClosed(window: this.record) == 0;
     }
 
+    // The window's size in pixels, as its `Window.framebufferSize()` gives it (as of the last `pump()`), for what holds
+    // this handle and not the `Window`: a GPU surface configures at it, so the window stays the one writer of a canvas's
+    // pixels (WIN-20). 0 × 0 once the window is closed, and for a handle adopted from elsewhere, whose maker knows it.
+    public unsafe const fn Size framebufferSize() {
+        Size s = Size.of(width: 0, height: 0);
+        if (this.record == null || windowClosed(window: this.record) != 0) { return s; }
+        framebufferSize(window: this.record, width: addr(of: s.width), height: addr(of: s.height));
+        return s;
+    }
+
     unsafe ~NativeWindow() { if (this.record != null) { releaseWindow(window: this.record); } }
 }
 

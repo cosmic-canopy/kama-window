@@ -5,6 +5,13 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **`NativeWindow.framebufferSize()`** (WIN-20, 2026-11-11, kama 0.9.911): the window's size in pixels through its
+  handle, as `Window.framebufferSize()` gives it, so a GPU surface holding the handle configures at the window's size
+  and the window stays the one writer of a canvas's pixels (`@kama/gpu`'s GPU-3, decision 2). 0 × 0 once the window is
+  closed, and for an adopted handle. `tests/` gains 6 cases natively, 3 under node and 5 in a browser.
+- The browser leg runs in every headless Chromium present: a Chrome for Testing pinned under `~/browsers`, Edge and
+  Chrome. `KAMA_BROWSER` names one, in place of `KAMA_WINDOW_BROWSER`, and `tools/webtest.mjs --list` says which.
+
 - **A window on the web: the page's `#canvas`** (WIN-3, 2026-11-11, kama 0.9.911; AGENTS.window.md item 8).
   - The package links a JS library (`js/winseam.js`) whose listeners queue records that `pump()` pulls into the ring,
     so nothing calls into the program from outside.
