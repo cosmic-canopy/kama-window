@@ -5,22 +5,26 @@ tested. What comes next is [ROADMAP.md](ROADMAP.md), why the package departs fro
 [AGENTS.window.md](AGENTS.window.md), and its history is the git log and [CHANGELOG.md](CHANGELOG.md).
 
 **Where it stands** (2026-11-11, kama 0.9.911): a system window natively on Windows (GLFW 3.5.1, MSYS2's static
-build), and a headless window on every target, each with a counted native record, so a GPU surface holds its window.
-The mouse, touch and a pen are one stream of pointer events, as the W3C's Pointer Events are. The window keeps what is
-held, and releases it on a focus change. On the web, opening a window refuses until the web half is built. Not
-published.
+build), on the web the page's canvas, and a headless window on every target, each with a counted native record, so a
+GPU surface holds its window. The mouse, touch and a pen are one stream of pointer events, as the W3C's Pointer Events
+are. The window keeps what is held, and releases it on a focus change. Not published.
 
 ## Using it
 
 `import { window::Window, window::Event, window::Key, … }`. Natively, Windows links GLFW statically (`libglfw3.a`);
-Linux and macOS link a system `glfw`, untried.
+Linux and macOS link a system `glfw`, untried. On the web the package links its own JS library (`js/winseam.js`).
 
 ## Invariants
 
 - **A `Window` has its own event queue,** so several windows work. A headless window is that queue and a size with
   nothing behind them: `post` fills it, for tests, replays and servers, and it never touches the system.
-- **The queue is one fixed ring of 256 records per window, in C** (`csrc/winseam.c`), for both kinds of window, so one
+- **The queue is one fixed ring of 256 records per window, in C** (`csrc/winseam.c`), for every kind of window, so one
   queue is tested. It never allocates after the window opens.
+- **On the web nothing calls into the program from outside.** The canvas's listeners queue records in JS, and `pump()`
+  pulls them into the ring, as GLFW's callbacks run inside `glfwPollEvents`; so a listener can never reach a program
+  that has quit, and the ring's rules are the same on every backend. The page's queue keeps them between pumps: one
+  pointer's moves coalesce, scrolls of one unit sum, the sizes keep the last, and past 1024 records an event is counted
+  into a `Dropped` where it happened, except an up, a cancel, a focus change, a lock and the sizes, which go on to 1536.
 - **Events come out one at a time, in the order they happened,** so a resize and a click stay in order.
 - **Nothing is dropped in silence.** A full ring keeps one slot for a `Dropped(n)` record, so a drop is reported where
   it happened, before anything that arrives once the reader makes room. Only an event that finds no free slot but the
@@ -75,14 +79,30 @@ Linux and macOS link a system `glfw`, untried.
 
 - **`Window.open(title:, width:, height:) -> Result<Window, WindowError>`:** a system window, `width` × `height`
   logical, opened with the default options. `WindowError::Refused(words)` gives the system's words when it will not
-  open one. On the web it refuses.
+  open one.
+  - **On the web, the page's `#canvas`,** emscripten's own name for a program's canvas. The canvas is the page's: the
+    window never creates or removes one. It refuses, in these words, with no page (`no page: a window opens on a
+    canvas, and this program is not running in a browser`), when nothing matches, when the element is not a canvas,
+    and when the canvas is already a window. The title is the page's, so `title` goes unused.
+  - At open the window sets the canvas's CSS size inline to `width` × `height` (unless `sizedByPage`), its backing
+    store to the pixels, `touch-action: none`, and a `tabindex` of 0 when it has none; closing gives each back.
 - **`Window.openWith(title:, width:, height:, options:)`** opens one as a `WindowOptions` says, named as kama names a
   build plus its settings (`connectWith`). `WindowOptions.make()` gives the defaults, and its fields are public:
   - `focused`, true by default: the window takes the keyboard focus as it opens, as a game should at launch. False
     leaves the focus where it is, as a tool's or a test's window should; natively both of GLFW's focus hints are set
-    from it on every open, so one open's choice never leaks into the next.
+    from it on every open, so one open's choice never leaks into the next. On the web the canvas is focused, or left
+    until the user clicks it. Either way opening posts no `Focus`.
+  - `sizedByPage`, false by default: on the web the page lays the canvas out, and `width` and `height` go unused. The
+    page must then give the canvas a CSS size: one with none is laid out at its pixel size, which the window sets from
+    the CSS size, so it would grow. Natively, nothing.
+- **`Window.openIn(canvas:, title:, width:, height:, options:)`** opens one as `openWith` does, on the web on the
+  page's canvas that `canvas`, a CSS selector, names: which canvas is what the window is, so it is spelled, never
+  defaulted. Several canvases are several windows, each with its own queue. Natively `canvas` goes unused, as the web
+  leaves `title` to the page, so a program's canvases are its windows natively with the same code. `open` and
+  `openWith` take `#canvas`.
 - **`Window.headless(width:, height:)`.**
-- **`pump()`** takes the system's pending events into the queue: natively, every open window's. Headless, nothing.
+- **`pump()`** takes the system's pending events into the queue: every open window's, natively GLFW's and on the web
+  the canvases' queues. Headless, nothing.
 - **`pollEvent() -> Optional<Event>`:** the oldest event, or `None` when the queue is empty.
 - **`post(event:)`:** an event into the queue as if the system had sent it: coalesced like one, and moving what is held
   like one, so a posted `Focus` releases what is held first. A posted `Resize` also sets the size. A replayed stream
@@ -90,15 +110,23 @@ Linux and macOS link a system `glfw`, untried.
 - **`releaseHeld()`:** an up for everything held, as a focus change makes them, with no `Focus` after: a program's own
   release, for a reason only it knows (a remote desktop that drops key ups, a long stall).
 - **Sizes:**
-  - `size() -> Size`, logical;
-  - `framebufferSize() -> Size`, in pixels;
-  - `scale() -> float32`, pixels per logical unit.
+  - `size() -> Size`, logical: on the web the canvas's CSS content box, rounded;
+  - `framebufferSize() -> Size`, in pixels: on the web the canvas's exact device pixels from its ResizeObserver's
+    `devicePixelContentBoxSize`, or CSS size × scale where a browser lacks it, and its backing store is set to them;
+  - `scale() -> float32`, pixels per logical unit: on the web the device pixel ratio, whose change a `matchMedia`
+    query reports.
 - **`setCursor(mode:)`:** `CursorMode::Normal`, `Hidden` or `Locked` (hidden, with raw and unbounded motion). A
   `PointerLock` event says when a lock takes hold. **Losing the focus while locked gives the pointer back,** as a
   browser does on blur.
+  - **On the web a lock waits for a click:** a browser grants one only in a user gesture, so `Locked` is a wish the
+    window asks for at the next pointer down on the canvas, with raw motion where offered. `PointerLock(true)` arrives
+    when it takes; a refusal posts nothing, and the wish stands. When the browser gives the lock back (Escape, a tab
+    switch), `PointerLock(false)` arrives and the mode falls back to `Normal`, so the program asks again.
 - **`nativeHandle() -> NativeWindow`:** what a GPU surface is made from, holding the window's record. A headless
-  window answers `NativeKind::None`. Natively only Win32's handles are answered so far.
-- **Dropping a window closes it:** hidden at once, natively, with no more events. A `NativeWindow` taken from it, or a
+  window answers `NativeKind::None`, and a web window `NativeKind::Canvas`, its `window()` the canvas's selector as a
+  C string. Natively only Win32's handles are answered so far.
+- **Dropping a window closes it:** hidden at once, natively, with no more events; on the web its listeners go and the
+  canvas is given back as it was found. A `NativeWindow` taken from it, or a
   GPU surface holding one, keeps its system window valid until the last of them is dropped, and reads it as closed.
 
 ## Event
@@ -152,6 +180,23 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 - **Pointers, natively: a mouse alone.** GLFW reports no touch or pen (WIN-11): the mouse is pointer 1, primary, one
   unit across, its enter and leave from GLFW's cursor-enter callback.
+- **The web:**
+  - **Keys and pointers are the canvas's while it has the focus.** Keys typed in the page's text field beside it are
+    the page's; a pointer down on the canvas focuses it, and holds the pointer until its up (pointer capture), as a
+    native window captures the mouse. Clicking elsewhere on the page takes the keys away, as clicking another window
+    does natively.
+  - **The window takes from the page:** the default of every key `Key` names (Tab, F1 to F24, Space and the arrows
+    included; Ctrl+S is the program's), a pointer down's, the context menu's and the wheel's over the canvas. A key
+    `Key` does not name is left to the page. The browser keeps the few chords no page can take (Ctrl+W, Ctrl+T), and
+    keyboard page zoom does not work while the canvas has the focus.
+  - **`Text` comes from a keydown's `key`:** one printable character, typed with neither Control nor Meta unless
+    AltGraph made it; a dead key and an IME's types nothing yet (WIN-5).
+  - **Escape while locked is the browser's:** it gives the lock back, and the program sees no Escape.
+  - **A tab switch while locked:** the browser gives the lock back before the blur, so `PointerLock(false)` comes
+    before the focus change's ups, not after them as natively.
+  - **No `CloseRequested`:** a page's close never waits for the program. Its visibility is `std::app`'s `Suspended`.
+  - **A wheel's unit is the browser's** (`Pixels` in Chromium; `Lines` where a browser says lines), and a page's worth
+    is the canvas's height in pixels.
 - **Held keys and buttons: nothing.** Every backend gives the same events. GLFW releases the keys and buttons it holds
   itself, after the focus callback and only on a loss, each with mods 0; the window has released them by then, so each
   of those ups is dropped (measured on GLFW 3.5.1, AGENTS.window.md item 5). A browser sends no `keyup` after a blur.
@@ -160,7 +205,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 133 cases. They cover:
+- `tests/`, one program, natively, debug and release: 134 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - what is held, on a headless window (`tests/src/held.kama`): the pairing of ups and downs, `Key::Unknown`, the
     release's order and bits, the room kept for ups in a full ring, a replayed stream, and `releaseHeld`;
@@ -176,14 +221,27 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     reading it as closed, copies, either drop order, and an adopted handle;
   - a system window, and its handle outliving it, still a window and hidden, through Win32 hooks of the tests' own;
   - the options: an unfocused window shown without taking the foreground, and, on hidden windows read through GLFW's
-    `FOCUS_ON_SHOW`, an unfocused open asking for no focus and a plain open after it asking for the focus again.
+    `FOCUS_ON_SHOW`, an unfocused open asking for no focus and a plain open after it asking for the focus again, and
+    `openIn` opening a system window, its canvas unused.
 
   The system windows are skipped when `KAMA_WINDOW_NO_DISPLAY` is set. **A test run never takes the keyboard:** every
   window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
   the program shows no more once one has taken the foreground;
-- the same program under node: 97 cases, the headless ones, and checks that opening a window refuses.
+- the same program under node: 100 cases, the headless ones, the DOM key table, and checks that opening a window
+  refuses with no page.
 - the same program in a headless Chromium (Edge or Chrome; `KAMA_WINDOW_BROWSER` names another), built for the web with
-  its own page, `tests/web/shell.html`: 97 cases. `tools/webtest.mjs` (node, no npm packages) serves it, runs the
+  its own page, `tests/web/shell.html`: 175 cases. Beside the headless ones (`tests/src/web.kama`):
+  - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
+  - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
+    keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,
+    pointers in the content box, chorded buttons, a touch's cancel, a pen's fields, the wheel's units, the page's
+    queue past its cap, the cursor, a canvas refused as a window twice, and what follows a size report (a new ratio, new
+    pixels alone, a new CSS size); dispatched as DOM events, in-process;
+  - `openIn`: its refusals, two canvases as two windows each with its own queue, a canvas's own tabindex kept, and a
+    canvas the page lays out (`sizedByPage`);
+  - then, as an App between frames: a resize from the ResizeObserver, and the browser's own input on request (a
+    click, keys, a key let go on the canvas after it was pressed in the field, a drag released outside the canvas, a
+    touch drag, pointer lock at a click, a locked move, Escape, and no lock after the browser gave it back). `tools/webtest.mjs` (node, no npm packages) serves it, runs the
   browser over the DevTools protocol with a throwaway profile at a device scale of 1.5, and reads the console to the
   summary line, an abort, an exception or a time limit. A case that needs the browser's own behaviour asks the driver
   for trusted input (a click, a key, a touch) by printing a request. Skipped, and said so, with no browser, `emcc` or

@@ -15,13 +15,7 @@
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: the web half
-
-| id | item | why |
-|---|---|---|
-| WIN-3 | **The web half**: a window on a canvas, `KeyboardEvent.code` to HID, the device pixel ratio and its changes, pointer lock, and W3C Pointer Events for mouse, touch and pen on every backend | [detail](ROADMAP_DETAIL.md#web-half) |
-
-## NEXT: gamepads
+## NOW: gamepads
 
 | id | item | why |
 |---|---|---|

@@ -28,11 +28,12 @@ file the agent's brief and the departures below, the record kama reads.
 
 ## Where things stand
 
-**[SPEC.md](SPEC.md) is what the package is, and [ROADMAP.md](ROADMAP.md) what comes next.** In short (2026-11-10, kama
-0.9.911): a system window natively on Windows and a headless one on every target, and a window's native record counted,
-so a GPU surface holds it (WIN-1, built), a window opens without taking the focus when asked (WIN-16, built), and the
-window keeps what is held and releases it on a focus change (WIN-2, built: the last stopgap). The web half and gamepads
-are not built yet, and the web half, WIN-3, is next. `tools/test.sh` passes before every commit.
+**[SPEC.md](SPEC.md) is what the package is, and [ROADMAP.md](ROADMAP.md) what comes next.** In short (2026-11-11, kama
+0.9.911): a system window natively on Windows, the page's canvas on the web, and a headless one on every target, and a
+window's native record counted, so a GPU surface holds it (WIN-1, built), a window opens without taking the focus when
+asked (WIN-16, built), the window keeps what is held and releases it on a focus change (WIN-2, built), and the web half
+with Pointer Events on every backend (WIN-3, built). `tests/` runs natively, under node and in headless Edge. Gamepads
+(WIN-4) are next. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -288,8 +289,8 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
      program's `FocusGained` and `FocusLost` into `Focus`. The program hands it those lifecycle events: `std::app` does
      not route them to packages behind its back. Rotation is not a lifecycle event; the size is read from the window.
      An undrawn Android window gets no touches (`NO_INPUT_CHANNEL`, measured by kama on the emulator).
-8. **Decided on 2026-11-11: the web half (WIN-3), a window on a canvas, and Pointer Events on every backend.** Being
-   built; how it was built goes at this item's end.
+8. **Built on 2026-11-11: the web half (WIN-3), a window on a canvas, and Pointer Events on every backend** (kama
+   0.9.911). How it was decided is below, and how it was built at this item's end.
 
    **Measured first, on 2026-11-11** (kyoten's `.scratch/win3-web/`): headless Edge 157 driven over the DevTools
    protocol from node 24, with no npm packages, and the browser's own trusted input. A plain page was measured, and so
@@ -418,6 +419,68 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
          `openIn` its own canvas, are four system windows natively with the same code.
        - The alternative, `WindowOptions` as a resource with setters (kama's `std::process` `Command` builder is the
          precedent), was not taken.
+
+   **Built (WIN-3), test-first, in three parts, each committed with every leg green and its mutations caught:**
+   1. **Pointer Events on both backends** (decision 2, and decision 9's `ScrollUnit`). The ring record grew to carry a
+      pointer (88 bytes), and the held set became a table of up to 16 pointers in the order they went down. 36 cases
+      were written first, not compiling on the old API (133 natively, 97 under node). 33 of 33 mutations were caught;
+      four of those cases were added on reading the code for what no case would catch (the order after a lift, a
+      cancel's pressure, a pointer's lock bits, `primary` posted). `@kama/gpu`'s suite passed on it unchanged.
+   2. **The browser leg** (decision 10): `tools/webtest.mjs` and `tests/web/shell.html`, proven on the headless cases
+      before the web window existed (97 in Edge 157). Each red path was run on a page of its own (a failure, an
+      exception, an abort, no summary), and a trusted click and key arrived as requested.
+   3. **The web window** (decisions 1 and 3 to 8, then 11): `js/winseam.js` and `winseam.c`'s web half. Its cases went
+      red first (the window refused to open), then green: 175 in Edge, 100 under node, 134 natively. 48 of 50
+      mutations of the JS library and the C web half were caught. Of the other two, one removed code the browser made
+      redundant (the JS held a locked pointer's position still, which the browser already does: the Pointer Lock spec,
+      and measured), and one is equivalent: C setting the mode to `Normal` when the browser gives the lock back, since
+      the JS holds the wish and the browser the lock. A first pass left C's rule that a size report posts `Resize` only
+      for a new CSS size uncaught, because no case changed the scale; the size path then got its in-process cases, and
+      the rule was caught.
+
+   **Measured in the building** (headless Edge 157 at a scale of 1.5, trusted input over the DevTools protocol):
+   - a click on an unfocused canvas gives `PointerEnter`, `Focus true`, then its down and up: the focus first, as a
+     native window's activation does;
+   - **item 5's first reading:** a key pressed in the page's field and let go on the canvas gives the canvas a `keyup`
+     it never saw go down, and the ring drops it. The second, a held key's repeat after a focus gain, cannot be made
+     headless (the protocol's `autoRepeat` is whatever the driver says), and decision 1 of item 5 makes it moot;
+   - a drag released outside the canvas ends in its up, through pointer capture (the mutation without it loses the up);
+   - a touch drag over the canvas gives its moves and its up, and no cancel, with `touch-action: none`;
+   - pointer lock takes at the next click; a locked move of 30 CSS pixels is `dx` 30 with the position held still;
+     Escape gives the lock back with no Escape key; after that, the next click does not lock;
+   - a trusted position at a scale of 1.5 comes back within a millionth of a pixel of the CSS one;
+   - **a change of the device pixel ratio cannot be made headless:** the protocol's `Emulation.setDeviceMetricsOverride`
+     fired a plain page's `matchMedia` change (at 119 ms, to 2.0000000596), but never reached the test page's, waiting
+     half a second, in three runs. What follows the browser's report is tested in-process instead
+     (`windowtests_report_sizes`), and the browser's own report is read, not run.
+
+   **The harness, found in the building:** focusing a text field scrolled the small headless viewport, so the driver
+   opens a 1280 × 1024 window and the tests focus with `preventScroll`; input beyond the viewport is not delivered as
+   page input; a drag's `mouseMoved` must name its held button, or the pointer is not in its active buttons state and
+   capture does not hold; the browser's helper processes hold the throwaway profile a moment after it exits; and a
+   mutation driver that builds for the web must itself be started from a UCRT64 login shell, so `emcc` is on its
+   `PATH`.
+
+   **Decided in the building, within the decisions:**
+   - the page's queue is capped at 1024 records, and an up, a cancel, a focus change, a lock and the sizes go on to
+     1536, so a key is never left held (decision 1); its drops are counted into the ring's `Dropped`;
+   - a pointer down on the canvas captures the pointer until its up (`setPointerCapture`), as a native window captures
+     the mouse, so a drag out of the canvas still ends;
+   - positions are the canvas's content box's, inside its border and padding;
+   - `Text` is read from a keydown's `key` when it is one printable character typed with neither Control nor Meta,
+     unless AltGraph made it (AltGr+E types €), so Ctrl+S types nothing;
+   - the wheel's deltas are negated, positive being left and up as GLFW and winit report (FFD negated only `deltaY`);
+   - opening posts no `Focus`, natively or on the web: the canvas is focused before the listeners are attached;
+   - `pump()` on any canvas window takes every canvas window's queue, as `glfwPollEvents` takes every GLFW window's.
+
+   **Where it lives:**
+   - `js/winseam.js`: the listeners, the page's queue, the DOM `code` table, sizes, pointer lock;
+   - `csrc/winseam.c`: `take_pointer()` and the pointer table on every leg, and the web half (`winseam_web_*` calls,
+     `web_take`, the layout asserted against the JS);
+   - `src/window.kama`: `Pointer`, `PointerKind`, `PointerButton`, `ScrollUnit`, the pointer events, `openIn`,
+     `WindowOptions.sizedByPage`;
+   - `tests/src/pointers.kama`, `tests/src/web.kama`, `tests/src/keys_web.kama`, `tests/js/windowtests.js`,
+     `tests/web/shell.html`, and `tools/webtest.mjs`.
 
 ## Where the truth is
 

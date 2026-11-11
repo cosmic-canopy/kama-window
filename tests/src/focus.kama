@@ -29,17 +29,9 @@ fn void openOptions(ref Tally t) {
     else { t.verdict(name: "the tests' windows open unfocused", why: "focused is true"); }
 }
 
-// On the web, until the html5 window is built, opening one with options refuses too.
+// On the web the focus is the canvas's (web.kama, AGENTS.window.md item 8, decision 4).
 @compileFor(ARCH_WASM32)
-unsafe fn bool focusCases(ref Tally t) {
-    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window test", width: 320, height: 200,
-                                                         options: quietly());
-    match (give opened) {
-        case Ok(value: w): { t.verdict(name: "on the web, opening a window with options refuses (not built yet)", why: "it opened"); }
-        case Err(error: e): { t.verdict(name: "on the web, opening a window with options refuses (not built yet)", why: ""); }
-    };
-    return true;
-}
+unsafe fn bool focusCases(ref Tally t) { return true; }
 
 // GLFW's FOCUS_ON_SHOW on `w`, which its open asked for: 1 when it would take the focus when shown.
 @compileFor(!ARCH_WASM32)
@@ -87,6 +79,15 @@ unsafe fn bool focusCases(ref Tally t) {
         case Err(error: e): {
             string why = e.message();
             t.verdict(name: "a plain open after an unfocused one would take the focus: the option does not leak", why: why);
+        }
+    };
+    Result<Window, WindowError> named = Window.openIn(canvas: "#no-such-canvas", title: "@kama/window hidden", width: 120,
+                                                      height: 80, options: quietly());
+    match (give named) {
+        case Ok(value: w): { t.verdict(name: "natively, openIn's canvas goes unused: a system window opens", why: ""); }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "natively, openIn's canvas goes unused: a system window opens", why: why);
         }
     };
     windowtests_shown_next(shown: 1);

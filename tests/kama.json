@@ -9,6 +9,7 @@
     ".": { "visibility": "internal" }
   },
   "shellFile": "web/shell.html",
+  "jsLibraries": ["js/windowtests.js"],
   "cincludes": ["csrc"],
   "csources": ["csrc/hooks.c"],
   "dependencies": {

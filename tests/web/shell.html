@@ -6,7 +6,7 @@
 <!--
   The page the tests program runs in, in the browser leg (tools/webtest.mjs). Its elements are what the web window's
   cases open on and focus between:
-  - #canvas, emscripten's own name for a program's canvas, which `Window.open` takes;
+  - #canvas, emscripten's own name for a program's canvas, which `Window.open` takes, with a border and padding;
   - #second, a second canvas with a tabindex of its own, which a window must keep;
   - #paged, a canvas the page lays out (200 × 100 CSS pixels), for a window that leaves its size to the page;
   - #field, a text field beside them, whose keys are the page's;
@@ -17,6 +17,7 @@
   html, body { margin: 0; padding: 0; }
   body { font: 13px system-ui, sans-serif; }
   canvas { display: block; }
+  #canvas { border: 3px solid #888; padding: 2px; }   /* positions are the content box's, inside both */
   #second { margin-top: 8px; }
   #panel { width: 200px; height: 100px; margin-top: 8px; }
   #paged { width: 100%; height: 100%; }

@@ -27,4 +27,28 @@ int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up);
 // window neither takes nor gives up the real focus. 1 when sent; -1 off Windows.
 int32_t windowtests_send_focus(void *hwnd, int32_t focused);
 
+// 1 when the C string at `p` is `s`.
+int32_t windowtests_cstr_is(const void *p, const char *s);
+
+// On the web, the tests' own JS library (tests/js/windowtests.js): DOM events dispatched at the element a selector names,
+// answering 1 when the event's default was left to the page and 0 when a listener prevented it, and what the window
+// did to the element. Not defined natively.
+int32_t windowtests_in_browser(void);
+int32_t windowtests_key(const char *sel, const char *type, const char *code, const char *key, int32_t mods,
+                        int32_t repeat);
+int32_t windowtests_pointer(const char *sel, const char *type, int32_t id, int32_t kind, double x, double y,
+                            int32_t button, int32_t buttons, float pressure, float tilt_x, float tilt_y, float twist,
+                            float width, float height, int32_t primary);
+int32_t windowtests_wheel(const char *sel, double dx, double dy, int32_t mode);
+int32_t windowtests_context_menu(const char *sel);
+void windowtests_focus(const char *sel);
+int32_t windowtests_active(const char *sel);
+int32_t windowtests_style_is(const char *sel, const char *prop, const char *value);
+int32_t windowtests_attr_is(const char *sel, const char *name, const char *value);
+void windowtests_set_style(const char *sel, const char *prop, const char *value);
+void windowtests_backing(const char *sel, int32_t *width, int32_t *height);
+int32_t windowtests_acked(void);
+int32_t windowtests_locked(const char *sel);
+int32_t windowtests_report_sizes(const char *sel, double width, double height, int32_t fw, int32_t fh, double scale);
+
 #endif

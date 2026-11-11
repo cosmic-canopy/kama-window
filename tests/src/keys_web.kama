@@ -1,8 +1,153 @@
 file @compileFor(ARCH_WASM32);
-// On the web there is no GLFW table to test (the DOM's `code` table comes with the web window).
+// The DOM's `KeyboardEvent.code` to the HID id `Key` is numbered by (WIN-3, AGENTS.window.md item 8), tested by externing
+// the package's JS table. Every key `Key` names is spelled here once, as the DOM names it, against the enum's own value,
+// and the table names no other. On the web there is no GLFW table, or GLFW button table, to test.
 
-import { Tally };
+import { Tally, window::Key };
 export { keyTable, buttonTable };
 
-fn void keyTable(ref Tally t) { }
+extern "winseam.h";
+extern fn int32 winseam_web_code_to_hid(UnsafeConstPtr<cchar> code);
+extern fn int32 winseam_web_code_count();
+
+unsafe fn void pair(ref Tally t, const ref string code, Key want) {
+    int32 got = winseam_web_code_to_hid(code: code.cstr());
+    int32 w = cast<int32>(want);
+    if (got != w) { t.verdict(name: "the DOM's ${code} is HID ${w}", why: "the table gives ${got}"); }
+}
+
+// One verdict for the whole table, so a run stays readable: each pair adds a failure of its own only when it is wrong.
+unsafe fn void keyTable(ref Tally t) {
+    int32 before = t.failed();
+    pair(t: t, code: "KeyA", want: Key::KeyA);
+    pair(t: t, code: "KeyB", want: Key::KeyB);
+    pair(t: t, code: "KeyC", want: Key::KeyC);
+    pair(t: t, code: "KeyD", want: Key::KeyD);
+    pair(t: t, code: "KeyE", want: Key::KeyE);
+    pair(t: t, code: "KeyF", want: Key::KeyF);
+    pair(t: t, code: "KeyG", want: Key::KeyG);
+    pair(t: t, code: "KeyH", want: Key::KeyH);
+    pair(t: t, code: "KeyI", want: Key::KeyI);
+    pair(t: t, code: "KeyJ", want: Key::KeyJ);
+    pair(t: t, code: "KeyK", want: Key::KeyK);
+    pair(t: t, code: "KeyL", want: Key::KeyL);
+    pair(t: t, code: "KeyM", want: Key::KeyM);
+    pair(t: t, code: "KeyN", want: Key::KeyN);
+    pair(t: t, code: "KeyO", want: Key::KeyO);
+    pair(t: t, code: "KeyP", want: Key::KeyP);
+    pair(t: t, code: "KeyQ", want: Key::KeyQ);
+    pair(t: t, code: "KeyR", want: Key::KeyR);
+    pair(t: t, code: "KeyS", want: Key::KeyS);
+    pair(t: t, code: "KeyT", want: Key::KeyT);
+    pair(t: t, code: "KeyU", want: Key::KeyU);
+    pair(t: t, code: "KeyV", want: Key::KeyV);
+    pair(t: t, code: "KeyW", want: Key::KeyW);
+    pair(t: t, code: "KeyX", want: Key::KeyX);
+    pair(t: t, code: "KeyY", want: Key::KeyY);
+    pair(t: t, code: "KeyZ", want: Key::KeyZ);
+    pair(t: t, code: "Digit1", want: Key::Digit1);
+    pair(t: t, code: "Digit2", want: Key::Digit2);
+    pair(t: t, code: "Digit3", want: Key::Digit3);
+    pair(t: t, code: "Digit4", want: Key::Digit4);
+    pair(t: t, code: "Digit5", want: Key::Digit5);
+    pair(t: t, code: "Digit6", want: Key::Digit6);
+    pair(t: t, code: "Digit7", want: Key::Digit7);
+    pair(t: t, code: "Digit8", want: Key::Digit8);
+    pair(t: t, code: "Digit9", want: Key::Digit9);
+    pair(t: t, code: "Digit0", want: Key::Digit0);
+    pair(t: t, code: "Enter", want: Key::Enter);
+    pair(t: t, code: "Escape", want: Key::Escape);
+    pair(t: t, code: "Backspace", want: Key::Backspace);
+    pair(t: t, code: "Tab", want: Key::Tab);
+    pair(t: t, code: "Space", want: Key::Space);
+    pair(t: t, code: "Minus", want: Key::Minus);
+    pair(t: t, code: "Equal", want: Key::Equal);
+    pair(t: t, code: "BracketLeft", want: Key::BracketLeft);
+    pair(t: t, code: "BracketRight", want: Key::BracketRight);
+    pair(t: t, code: "Backslash", want: Key::Backslash);
+    pair(t: t, code: "IntlHash", want: Key::IntlHash);
+    pair(t: t, code: "Semicolon", want: Key::Semicolon);
+    pair(t: t, code: "Quote", want: Key::Quote);
+    pair(t: t, code: "Backquote", want: Key::Backquote);
+    pair(t: t, code: "Comma", want: Key::Comma);
+    pair(t: t, code: "Period", want: Key::Period);
+    pair(t: t, code: "Slash", want: Key::Slash);
+    pair(t: t, code: "CapsLock", want: Key::CapsLock);
+    pair(t: t, code: "F1", want: Key::F1);
+    pair(t: t, code: "F2", want: Key::F2);
+    pair(t: t, code: "F3", want: Key::F3);
+    pair(t: t, code: "F4", want: Key::F4);
+    pair(t: t, code: "F5", want: Key::F5);
+    pair(t: t, code: "F6", want: Key::F6);
+    pair(t: t, code: "F7", want: Key::F7);
+    pair(t: t, code: "F8", want: Key::F8);
+    pair(t: t, code: "F9", want: Key::F9);
+    pair(t: t, code: "F10", want: Key::F10);
+    pair(t: t, code: "F11", want: Key::F11);
+    pair(t: t, code: "F12", want: Key::F12);
+    pair(t: t, code: "PrintScreen", want: Key::PrintScreen);
+    pair(t: t, code: "ScrollLock", want: Key::ScrollLock);
+    pair(t: t, code: "Pause", want: Key::Pause);
+    pair(t: t, code: "Insert", want: Key::Insert);
+    pair(t: t, code: "Home", want: Key::Home);
+    pair(t: t, code: "PageUp", want: Key::PageUp);
+    pair(t: t, code: "Delete", want: Key::Delete);
+    pair(t: t, code: "End", want: Key::End);
+    pair(t: t, code: "PageDown", want: Key::PageDown);
+    pair(t: t, code: "ArrowRight", want: Key::ArrowRight);
+    pair(t: t, code: "ArrowLeft", want: Key::ArrowLeft);
+    pair(t: t, code: "ArrowDown", want: Key::ArrowDown);
+    pair(t: t, code: "ArrowUp", want: Key::ArrowUp);
+    pair(t: t, code: "NumLock", want: Key::NumLock);
+    pair(t: t, code: "NumpadDivide", want: Key::NumpadDivide);
+    pair(t: t, code: "NumpadMultiply", want: Key::NumpadMultiply);
+    pair(t: t, code: "NumpadSubtract", want: Key::NumpadSubtract);
+    pair(t: t, code: "NumpadAdd", want: Key::NumpadAdd);
+    pair(t: t, code: "NumpadEnter", want: Key::NumpadEnter);
+    pair(t: t, code: "Numpad1", want: Key::Numpad1);
+    pair(t: t, code: "Numpad2", want: Key::Numpad2);
+    pair(t: t, code: "Numpad3", want: Key::Numpad3);
+    pair(t: t, code: "Numpad4", want: Key::Numpad4);
+    pair(t: t, code: "Numpad5", want: Key::Numpad5);
+    pair(t: t, code: "Numpad6", want: Key::Numpad6);
+    pair(t: t, code: "Numpad7", want: Key::Numpad7);
+    pair(t: t, code: "Numpad8", want: Key::Numpad8);
+    pair(t: t, code: "Numpad9", want: Key::Numpad9);
+    pair(t: t, code: "Numpad0", want: Key::Numpad0);
+    pair(t: t, code: "NumpadDecimal", want: Key::NumpadDecimal);
+    pair(t: t, code: "IntlBackslash", want: Key::IntlBackslash);
+    pair(t: t, code: "ContextMenu", want: Key::ContextMenu);
+    pair(t: t, code: "NumpadEqual", want: Key::NumpadEqual);
+    pair(t: t, code: "F13", want: Key::F13);
+    pair(t: t, code: "F14", want: Key::F14);
+    pair(t: t, code: "F15", want: Key::F15);
+    pair(t: t, code: "F16", want: Key::F16);
+    pair(t: t, code: "F17", want: Key::F17);
+    pair(t: t, code: "F18", want: Key::F18);
+    pair(t: t, code: "F19", want: Key::F19);
+    pair(t: t, code: "F20", want: Key::F20);
+    pair(t: t, code: "F21", want: Key::F21);
+    pair(t: t, code: "F22", want: Key::F22);
+    pair(t: t, code: "F23", want: Key::F23);
+    pair(t: t, code: "F24", want: Key::F24);
+    pair(t: t, code: "ControlLeft", want: Key::ControlLeft);
+    pair(t: t, code: "ShiftLeft", want: Key::ShiftLeft);
+    pair(t: t, code: "AltLeft", want: Key::AltLeft);
+    pair(t: t, code: "MetaLeft", want: Key::MetaLeft);
+    pair(t: t, code: "ControlRight", want: Key::ControlRight);
+    pair(t: t, code: "ShiftRight", want: Key::ShiftRight);
+    pair(t: t, code: "AltRight", want: Key::AltRight);
+    pair(t: t, code: "MetaRight", want: Key::MetaRight);
+    int32 after = t.failed();
+    int32 wrong = after - before;
+    if (wrong == 0) { t.verdict(name: "every key Key names maps from its DOM code to its HID id (119 keys)", why: ""); }
+    int32 count = winseam_web_code_count();
+    if (count == 119) { t.verdict(name: "the DOM table names no key Key does not", why: ""); }
+    else { t.verdict(name: "the DOM table names no key Key does not", why: "it names ${count}"); }
+    string unknown = "Lang3";
+    int32 none = winseam_web_code_to_hid(code: unknown.cstr());
+    if (none == 0) { t.verdict(name: "a DOM code the table does not name is Key::Unknown", why: ""); }
+    else { t.verdict(name: "a DOM code the table does not name is Key::Unknown", why: "Lang3 gives ${none}"); }
+}
+
 fn void buttonTable(ref Tally t) { }

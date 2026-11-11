@@ -1,6 +1,8 @@
 // hooks.c: hooks.h's bodies. Win32 answers natively on Windows; elsewhere every question answers -1.
 #include "hooks.h"
 
+#include <string.h>
+
 #if defined(_WIN32)
 #include <windows.h>
 #include <GLFW/glfw3.h>
@@ -39,3 +41,5 @@ void windowtests_shown_next(int32_t shown) { (void)shown; }
 int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up) { (void)hwnd; (void)vk; (void)up; return -1; }
 int32_t windowtests_send_focus(void *hwnd, int32_t focused) { (void)hwnd; (void)focused; return -1; }
 #endif
+
+int32_t windowtests_cstr_is(const void *p, const char *s) { return p != NULL && strcmp((const char *)p, s) == 0; }

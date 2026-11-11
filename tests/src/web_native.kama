@@ -1,0 +1,8 @@
+file @compileFor(!ARCH_WASM32);
+// The web window's cases run on the web alone (web.kama); natively the summary is printed at once.
+
+import { Tally, summary };
+export { webWindow, webFinish };
+
+fn void webWindow(ref Tally t) { }
+unsafe fn uint8 webFinish(Tally t) { return summary(t: t); }

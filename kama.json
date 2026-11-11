@@ -18,6 +18,7 @@
   },
   "cincludes": ["csrc"],
   "csources": ["csrc/winseam.c"],
+  "jsLibraries": ["js/winseam.js"],
   "ldflags": [
     { "flag": "-l:libglfw3.a", "compileFor": ["OS_WINDOWS"] },
     { "flag": "-lgdi32", "compileFor": ["OS_WINDOWS"] },

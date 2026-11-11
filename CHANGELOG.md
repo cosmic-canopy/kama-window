@@ -5,6 +5,22 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **A window on the web: the page's `#canvas`** (WIN-3, 2026-11-11, kama 0.9.911; AGENTS.window.md item 8).
+  - The package links a JS library (`js/winseam.js`) whose listeners queue records that `pump()` pulls into the ring,
+    so nothing calls into the program from outside.
+  - Keys come from `KeyboardEvent.code` through one table, `Text` from a keydown's `key`, and the window takes the
+    defaults of the keys it names, a pointer down, the context menu and the wheel.
+  - Focus is the canvas's, and `focused` focuses it at open; the window gives the canvas a `tabindex` and
+    `touch-action: none`, and captures a pointer until its up.
+  - The canvas's CSS size is set from `width` and `height`, unless `WindowOptions.sizedByPage`; its backing store
+    follows its exact device pixels, and a change is a `Resize` or `ScaleChanged`.
+  - `setCursor(Locked)` asks for the lock at the next click; the browser giving it back sets the mode to `Normal`.
+  - `nativeHandle()` answers `NativeKind::Canvas` with the selector.
+  - `Window.openIn(canvas:, title:, width:, height:, options:)` opens on the canvas a selector names, several canvases
+    being several windows; natively the selector goes unused. `open` and `openWith` take `#canvas`.
+  - `winseam_open` takes the canvas's selector and `sized_by_page`.
+  - `tests/` runs in headless Edge: 175 cases there, 100 under node, 134 natively.
+
 - **Breaking: the mouse, touch and a pen are one stream of pointer events,** as the W3C's Pointer Events are (WIN-3,
   2026-11-11, kama 0.9.911; AGENTS.window.md item 8, decision 2).
   - `PointerMove`, `PointerDown`, `PointerUp`, `PointerCancel`, `PointerEnter` and `PointerLeave` replace `MouseMove`

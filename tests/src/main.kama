@@ -8,10 +8,10 @@ import {
     window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::Pointer,
     window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
     keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
-    pointerCases, mouseAt,
+    pointerCases, mouseAt, webWindow, webFinish,
 };
 
-export { Tally, describe };
+export { Tally, describe, summary };
 
 type resource Tally {
     int32 runs = 0;
@@ -210,15 +210,9 @@ unsafe fn void queueDropsPartial(ref Tally t) {
     expectNext(t: t, w: w, name: "and then the queue is empty", want: "(empty)");
 }
 
-// On the web, until the html5 window is built, opening one refuses, saying so, rather than half-working.
+// On the web, a window on the page's canvas (web.kama), or, under node, a refusal.
 @compileFor(ARCH_WASM32)
-unsafe fn void systemWindow(ref Tally t) {
-    Result<Window, WindowError> opened = Window.open(title: "@kama/window test", width: 320, height: 200);
-    match (give opened) {
-        case Ok(value: w): { t.verdict(name: "on the web, opening a window refuses (not built yet)", why: "it opened"); }
-        case Err(error: e): { t.verdict(name: "on the web, opening a window refuses (not built yet)", why: ""); }
-    };
-}
+unsafe fn void systemWindow(ref Tally t) { webWindow(t: t); }
 
 // A system window opens, has a size and a native handle, and closes when dropped.
 @compileFor(!ARCH_WASM32)
@@ -268,6 +262,11 @@ unsafe fn uint8 appMain() {
         systemWindow(t: t);
         systemHandles(t: t);
     }
+    return webFinish(t: give t);
+}
+
+// The last line a run prints, which tools/webtest.mjs reads in the browser; the exit status.
+fn uint8 summary(ref Tally t) {
     int32 runs = t.count();
     int32 failed = t.failed();
     println(s: "window tests: ${runs} cases, ${failed} failed");

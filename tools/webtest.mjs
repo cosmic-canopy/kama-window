@@ -14,7 +14,7 @@
 // take) prints a request and waits for it to be done:
 //
 //   webtest: <seq> press|release|click <selector> <x> <y> [left|middle|right]    a mouse button, at x, y CSS pixels
-//                                                                                 from the element's top-left corner
+//                                                                                 from the element's content box
 //   webtest: <seq> move <selector> <x> <y> [buttons]                              the mouse moved there
 //   webtest: <seq> key down|up|tap <code> <key> <keyCode>                        a key, to the focused element
 //   webtest: <seq> touch <selector> <x0> <y0> <x1> <y1> <steps>                  a finger dragged from one point to another
@@ -100,7 +100,7 @@ class Cdp {
 async function launch(browser, profile) {
     fs.rmSync(profile, { recursive: true, force: true });
     const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
-                  '--no-default-browser-check', '--disable-extensions', `--force-device-scale-factor=${SCALE}`,
+                  '--no-default-browser-check', '--disable-extensions', `--force-device-scale-factor=${SCALE}`, '--window-size=1280,1024',
                   '--enable-unsafe-webgpu', 'about:blank'];
     const proc = spawn(browser, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     const url = await new Promise((resolve, reject) => {
@@ -153,19 +153,28 @@ async function main(argv) {
             return r.result.value;
         };
 
-        // An element's top-left corner, in the page's CSS pixels.
+        // The top-left corner of an element's content box, inside its border and padding, in the page's CSS pixels: where
+        // a window's positions start.
         const corner = async (selector) => {
             const r = await evaluate(`(() => { const e = document.querySelector(${JSON.stringify(selector)});
-                if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top }; })()`);
+                if (!e) return null; const b = e.getBoundingClientRect(), cs = getComputedStyle(e);
+                const px = (v) => parseFloat(v) || 0;
+                return { x: b.left + px(cs.borderLeftWidth) + px(cs.paddingLeft),
+                         y: b.top + px(cs.borderTopWidth) + px(cs.paddingTop) }; })()`);
             if (!r) throw new Error(`no element matches ${selector}`);
             return r;
         };
         const BUTTON_BITS = { left: 1, right: 2, middle: 4 };
         let mouseButtons = 0;
+        // A move while a button is held names that button, as a drag does (Chromium reads a move's `button` for the
+        // drag; with none, the pointer is not in its active buttons state, and pointer capture does not hold).
         const mouse = async (type, x, y, button = 'none') => {
             const bit = BUTTON_BITS[button] || 0;
             if (type === 'mousePressed') mouseButtons |= bit;
             if (type === 'mouseReleased') mouseButtons &= ~bit;
+            if (type === 'mouseMoved') {
+                button = (mouseButtons & 1) ? 'left' : (mouseButtons & 2) ? 'right' : (mouseButtons & 4) ? 'middle' : 'none';
+            }
             await send('Input.dispatchMouseEvent', { type, x, y, button, buttons: mouseButtons, clickCount: type === 'mouseMoved' ? 0 : 1 });
         };
         const perform = async (verb, args) => {

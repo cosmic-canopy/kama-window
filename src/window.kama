@@ -1,7 +1,8 @@
 // @kama/window: a window and its events. The design is kama's (ROADMAP_DETAIL.md § 8, s8-input, KR-26):
 //
-// - A `Window` is a GLFW window natively (the web's `#canvas` comes next) with its own event queue, so several work. A
-//   headless one has the queue and a size and nothing behind them: `post` fills it, for tests, replays and servers.
+// - A `Window` is a GLFW window natively, and on the web the page's canvas (WIN-3, AGENTS.window.md item 8), each with
+//   its own event queue, so several work. A headless one has the queue and a size and nothing behind them: `post`
+//   fills it, for tests, replays and servers.
 // - `pump()` is explicit; `pollEvent()` takes one event at a time, in the order they happened, so a resize and a click
 //   stay in order. The queue is a fixed ring that coalesces moves, scrolls and resizes, and reports `Dropped(n)` rather
 //   than dropping in silence.
@@ -326,9 +327,12 @@ unsafe fn winseam_event recordOf(const ref Event event) {
 // How a system window opens (`Window.openWith`), each field public with its default, as kama's `std::net` options are:
 // - `focused`: the window takes the keyboard focus as it opens; true by default, since a game takes the focus at
 //   launch. False opens it behind whatever has the focus, as a tool's or a test's window should. Natively it is GLFW's
-//   `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW`; on the web a canvas takes the focus only when the page gives it.
+//   `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW`; on the web the canvas is focused, or left until the user clicks it.
+// - `sizedByPage`: on the web, the page lays the canvas out, and `width` and `height` go unused; false by default, so
+//   the window sets the canvas's CSS size, as a native window opens at its size. Natively, nothing.
 type value WindowOptions {
     public bool focused = true;
+    public bool sizedByPage = false;
 
     public ctor make() { }
 }
@@ -341,15 +345,28 @@ type resource Window {
         return Window.openWith(title: title, width: width, height: height, options: WindowOptions.make());
     }
 
-    // A system window, `width` × `height` logical, titled `title`, opened as `options` say.
+    // A system window, `width` × `height` logical, titled `title`, opened as `options` say. On the web, the page's
+    // `#canvas` (emscripten's own name for a program's canvas), and the title is the page's.
     public unsafe ctor Result<Window, WindowError> openWith(const ref string title, int32 width, int32 height,
                                                             const ref WindowOptions options) {
+        return Window.openIn(canvas: "#canvas", title: title, width: width, height: height, options: options);
+    }
+
+    // A system window as `openWith` opens one, on the web on the page's canvas that `canvas` (a CSS selector) names:
+    // which canvas is what the window is, so it is spelled, as `std::net` spells an address (AGENTS.window.md item 8,
+    // decision 11). Several canvases are several windows. Natively `canvas` goes unused, as the web leaves `title` to
+    // the page, so a program's canvases are its windows natively with the same code.
+    public unsafe ctor Result<Window, WindowError> openIn(const ref string canvas, const ref string title, int32 width,
+                                                          int32 height, const ref WindowOptions options) {
         InlineArray<uint8>#(512) why = [0; 512];
         int32 whyLength = 0;
         int32 focused = 0;
         if (options.focused) { focused = 1; }
+        int32 sizedByPage = 0;
+        if (options.sizedByPage) { sizedByPage = 1; }
         UnsafePtr s = openWindow(title: title.cstr(), width: width, height: height, focused: focused,
-                                 why: addr(of: why[0]), capacity: 512, whyLength: addr(of: whyLength));
+                                 canvas: canvas.cstr(), sizedByPage: sizedByPage, why: addr(of: why[0]), capacity: 512,
+                                 whyLength: addr(of: whyLength));
         if (s == null) {
             DynamicArray<uint8> bytes = DynamicArray.empty();
             isize i = 0;
@@ -430,7 +447,8 @@ type resource Window {
     }
 
     // The system's handles, for a GPU surface, holding the window's record: valid while the handle lives, after this
-    // window is dropped too. Kind None for a headless window, and natively on Windows only so far.
+    // window is dropped too. Kind None for a headless window; Canvas on the web, its window the canvas's selector;
+    // natively on Windows only so far.
     public unsafe const fn NativeWindow nativeHandle() {
         if (this.seam == null) { return NativeWindow.adopt(kind: NativeKind::None, display: null, window: null); }
         NativeKind kind = NativeKind::None;

@@ -52,7 +52,8 @@ type extern value winseam_event {
 }
 
 extern fn UnsafePtr winseam_open(UnsafeConstPtr<cchar> title, int32 width, int32 height, int32 focused,
-                                 UnsafePtr<uint8> why, int32 capacity, UnsafePtr<int32> why_length);
+                                 UnsafeConstPtr<cchar> canvas, int32 sized_by_page, UnsafePtr<uint8> why,
+                                 int32 capacity, UnsafePtr<int32> why_length);
 extern fn UnsafePtr winseam_headless(int32 width, int32 height);
 extern fn void winseam_close(UnsafePtr window);
 extern fn void winseam_hold(UnsafePtr window);
@@ -72,9 +73,10 @@ extern fn UnsafePtr winseam_native_window(UnsafePtr window);
 extern fn int32 winseam_glfw_key_to_hid(int32 glfw_key);
 
 unsafe fn UnsafePtr openWindow(UnsafeConstPtr<cchar> title, int32 width, int32 height, int32 focused,
-                               UnsafePtr<uint8> why, int32 capacity, UnsafePtr<int32> whyLength) {
-    return winseam_open(title: title, width: width, height: height, focused: focused, why: why, capacity: capacity,
-                        why_length: whyLength);
+                               UnsafeConstPtr<cchar> canvas, int32 sizedByPage, UnsafePtr<uint8> why, int32 capacity,
+                               UnsafePtr<int32> whyLength) {
+    return winseam_open(title: title, width: width, height: height, focused: focused, canvas: canvas,
+                        sized_by_page: sizedByPage, why: why, capacity: capacity, why_length: whyLength);
 }
 unsafe fn UnsafePtr headlessWindow(int32 width, int32 height) { return winseam_headless(width: width, height: height); }
 unsafe fn void closeWindow(UnsafePtr window) { winseam_close(window: window); }

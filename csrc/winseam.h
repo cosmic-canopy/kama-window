@@ -74,11 +74,12 @@ typedef struct winseam_event {
 
 typedef struct winseam_window winseam_window;
 
-// A window with a GLFW window behind it, `width` × `height` logical, taking the focus as it opens when `focused` is 1
-// and leaving it where it is when 0. NULL on failure, with the reason copied into `why` (at most `capacity` bytes,
-// UTF-8, not terminated) and its length in `*why_length`.
-winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
-                             int32_t capacity, int32_t *why_length);
+// A system window, `width` × `height` logical, taking the focus as it opens when `focused` is 1 and leaving it where it
+// is when 0. Natively a GLFW window titled `title`. On the web the page's canvas `canvas` (a selector), whose CSS size
+// the window sets to `width` × `height` unless `sized_by_page` is 1; `title` is the page's to set. NULL on failure, with
+// the reason copied into `why` (at most `capacity` bytes, UTF-8, not terminated) and its length in `*why_length`.
+winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, const char *canvas,
+                             int32_t sized_by_page, uint8_t *why, int32_t capacity, int32_t *why_length);
 // A window with no system window behind it: its ring, its size and `post`. Never touches GLFW. NULL only when out of
 // memory.
 winseam_window *winseam_headless(int32_t width, int32_t height);
@@ -96,7 +97,8 @@ int32_t winseam_closed(winseam_window *window);
 // Records alive in the process, for the tests.
 int32_t winseam_live_records(void);
 
-// Natively, take the system's pending events into every open window's ring. Headless or on the web, nothing.
+// Take the system's pending events into every open window's ring: natively GLFW's, on the web the queues the package's
+// JS library fills. Headless, nothing.
 void winseam_pump(winseam_window *window);
 // The next record into `*into`: 1, or 0 when the ring is empty.
 int32_t winseam_next(winseam_window *window, winseam_event *into);
@@ -124,5 +126,9 @@ void *winseam_native_window(winseam_window *window);
 // to the W3C's numbering, -1 when unmapped.
 int32_t winseam_glfw_key_to_hid(int32_t glfw_key);
 int32_t winseam_glfw_button_to_pointer(int32_t glfw_button);
+// On the web, the DOM's `KeyboardEvent.code` to a HID usage id (0 when unmapped), and how many codes the table names: the
+// package's JS library's (js/winseam.js). Not defined natively.
+int32_t winseam_web_code_to_hid(const char *code);
+int32_t winseam_web_code_count(void);
 
 #endif

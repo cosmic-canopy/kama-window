@@ -1,0 +1,710 @@
+file @compileFor(ARCH_WASM32);
+// WIN-3: a window on a canvas (AGENTS.window.md item 8). Under node there is no page, and opening refuses. In a browser
+// (tools/webtest.mjs runs the program in tests/web/shell.html) the window opens on #canvas, and:
+// - `webWindow` holds what follows at once: DOM events dispatched at the page's elements, the web's equivalent of the
+//   Win32 messages natively, reach the window's listeners before the dispatch returns, and `pump()` takes them;
+// - `webFinish` holds what takes the browser's own time or input: a resize, which the ResizeObserver reports between
+//   frames, and trusted input the driver performs on request (a click, keys, a touch, pointer lock). It runs as an App,
+//   one step a tick, and prints the summary when done.
+
+import {
+    core::println,
+    std::app::App, std::app::Lifecycle, std::app::run, std::app::quit,
+    Tally, describe, quietly, drained, expectDrained, summary,
+    window::Window, window::WindowError, window::WindowOptions, window::Event, window::Pointer, window::CursorMode,
+    window::Size, window::NativeWindow, window::NativeKind,
+};
+export { webWindow, webFinish };
+
+extern "hooks.h";
+extern fn int32 windowtests_cstr_is(UnsafeConstPtr p, UnsafeConstPtr<cchar> s);
+extern fn int32 windowtests_in_browser();
+extern fn int32 windowtests_key(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> type, UnsafeConstPtr<cchar> code,
+                                UnsafeConstPtr<cchar> key, int32 mods, int32 repeat);
+extern fn int32 windowtests_pointer(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> type, int32 id, int32 kind,
+                                    float64 x, float64 y, int32 button, int32 buttons, float32 pressure,
+                                    float32 tilt_x, float32 tilt_y, float32 twist, float32 width, float32 height,
+                                    int32 primary);
+extern fn int32 windowtests_wheel(UnsafeConstPtr<cchar> sel, float64 dx, float64 dy, int32 mode);
+extern fn int32 windowtests_context_menu(UnsafeConstPtr<cchar> sel);
+extern fn void windowtests_focus(UnsafeConstPtr<cchar> sel);
+extern fn int32 windowtests_active(UnsafeConstPtr<cchar> sel);
+extern fn int32 windowtests_style_is(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> prop, UnsafeConstPtr<cchar> value);
+extern fn int32 windowtests_attr_is(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> name, UnsafeConstPtr<cchar> value);
+extern fn void windowtests_set_style(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> prop, UnsafeConstPtr<cchar> value);
+extern fn void windowtests_backing(UnsafeConstPtr<cchar> sel, UnsafePtr<int32> width, UnsafePtr<int32> height);
+extern fn int32 windowtests_acked();
+extern fn int32 windowtests_locked(UnsafeConstPtr<cchar> sel);
+extern fn int32 windowtests_report_sizes(UnsafeConstPtr<cchar> sel, float64 width, float64 height, int32 fw, int32 fh,
+                                         float64 scale);
+
+// ---- the page --------------------------------------------------------------------------------------------------------
+
+// A key event at `sel`: true when its default was left to the page, false when the window prevented it.
+unsafe fn bool keyAt(const ref string sel, const ref string type, const ref string code, const ref string key,
+                     int32 mods, int32 repeat) {
+    return windowtests_key(sel: sel.cstr(), type: type.cstr(), code: code.cstr(), key: key.cstr(), mods: mods,
+                           repeat: repeat) == 1;
+}
+unsafe fn bool keyEvent(const ref string type, const ref string code, const ref string key, int32 mods) {
+    return keyAt(sel: "#canvas", type: type, code: code, key: key, mods: mods, repeat: 0);
+}
+
+// A mouse, touch (kind 1) or pen (kind 2) event at x, y in #canvas's content box.
+unsafe fn bool pointer(const ref string type, int32 id, int32 kind, float64 x, float64 y, int32 button, int32 buttons) {
+    string sel = "#canvas";
+    return windowtests_pointer(sel: sel.cstr(), type: type.cstr(), id: id, kind: kind, x: x, y: y, button: button,
+                               buttons: buttons, pressure: 0.0, tilt_x: 0.0, tilt_y: 0.0, twist: 0.0, width: 1.0,
+                               height: 1.0, primary: 1) == 1;
+}
+
+// A mouse event at x, y in `sel`'s content box.
+unsafe fn bool mouseAt(const ref string sel, const ref string type, float64 x, float64 y, int32 button, int32 buttons) {
+    return windowtests_pointer(sel: sel.cstr(), type: type.cstr(), id: 1, kind: 0, x: x, y: y, button: button,
+                               buttons: buttons, pressure: 0.0, tilt_x: 0.0, tilt_y: 0.0, twist: 0.0, width: 1.0,
+                               height: 1.0, primary: 1) == 1;
+}
+
+unsafe fn bool styleOf(const ref string sel, const ref string prop, const ref string value) {
+    return windowtests_style_is(sel: sel.cstr(), prop: prop.cstr(), value: value.cstr()) == 1;
+}
+unsafe fn bool attrOf(const ref string sel, const ref string name, const ref string value) {
+    return windowtests_attr_is(sel: sel.cstr(), name: name.cstr(), value: value.cstr()) == 1;
+}
+
+// What opening on `canvas` refuses with, or "it opened".
+unsafe fn string refusal(const ref string canvas) {
+    Result<Window, WindowError> made = Window.openIn(canvas: canvas, title: "refused", width: 10, height: 10,
+                                                     options: quietly());
+    return match (give made) {
+        case Ok(value: w): "it opened";
+        case Err(error: e): e.message();
+    };
+}
+
+unsafe fn void focusOn(const ref string sel) { windowtests_focus(sel: sel.cstr()); }
+unsafe fn bool active(const ref string sel) { return windowtests_active(sel: sel.cstr()) == 1; }
+unsafe fn bool styleIs(const ref string prop, const ref string value) {
+    string sel = "#canvas";
+    return windowtests_style_is(sel: sel.cstr(), prop: prop.cstr(), value: value.cstr()) == 1;
+}
+unsafe fn bool attrIs(const ref string name, const ref string value) {
+    string sel = "#canvas";
+    return windowtests_attr_is(sel: sel.cstr(), name: name.cstr(), value: value.cstr()) == 1;
+}
+unsafe fn void setStyle(const ref string prop, const ref string value) {
+    string sel = "#canvas";
+    windowtests_set_style(sel: sel.cstr(), prop: prop.cstr(), value: value.cstr());
+}
+unsafe fn Size backing() {
+    string sel = "#canvas";
+    Size s = Size.of(width: 0, height: 0);
+    windowtests_backing(sel: sel.cstr(), width: addr(of: s.width), height: addr(of: s.height));
+    return s;
+}
+
+unsafe fn void check(ref Tally t, const ref string name, bool ok, const ref string why) {
+    if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
+}
+
+// What the queue holds after a pump.
+unsafe fn string pumped(ref Window w) {
+    w.pump();
+    return drained(w: w);
+}
+
+unsafe fn void expectPumped(ref Tally t, ref Window w, const ref string name, const ref string want) {
+    w.pump();
+    expectDrained(t: t, w: w, name: name, want: want);
+}
+
+// The next event's pointer, after a pump, when it is a pointer event.
+unsafe fn Optional<Pointer> nextPointer(ref Window w) {
+    Optional<Event> e = w.pollEvent();
+    return match (e) {
+        case Some(value: v): match (v) {
+            case PointerMove(pointer: p, dx: dx, dy: dy): Optional::Some(value: p);
+            case PointerDown(pointer: p, button: b, mods: m): Optional::Some(value: p);
+            case PointerUp(pointer: p, button: b, mods: m): Optional::Some(value: p);
+            case PointerCancel(pointer: p): Optional::Some(value: p);
+            case PointerEnter(pointer: p): Optional::Some(value: p);
+            case PointerLeave(pointer: p): Optional::Some(value: p);
+            case _: Optional::None;
+        };
+        case None: Optional::None;
+    };
+}
+
+// ---- at once ---------------------------------------------------------------------------------------------------------
+
+// Decision 3 under node: no page, so opening refuses, saying why.
+unsafe fn void noPage(ref Tally t) {
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window test", width: 320, height: 200,
+                                                         options: quietly());
+    match (give opened) {
+        case Ok(value: w): { t.verdict(name: "with no page (node), opening a window refuses", why: "it opened"); }
+        case Err(error: e): {
+            string words = e.message();
+            string want = "no page: a window opens on a canvas, and this program is not running in a browser";
+            check(t: t, name: "with no page (node), opening a window refuses, saying why", ok: words == want,
+                  why: "it says `${words}`");
+        }
+    };
+    string named = refusal(canvas: "#game");
+    check(t: t, name: "with no page (node), opening a named canvas refuses too",
+          ok: named == "no page: a window opens on a canvas, and this program is not running in a browser",
+          why: "it says `${named}`");
+}
+
+// Decision 3 and 6: the window on the page's #canvas, its sizes, and what it sets on the canvas.
+unsafe fn void openedCases(ref Tally t, ref Window w) {
+    Size s = w.size();
+    Size px = w.framebufferSize();
+    float32 scale = w.scale();
+    check(t: t, name: "a window on #canvas is width × height logical, and pixels at the device's scale (1.5)",
+          ok: s.width == 320 && s.height == 200 && px.width == 480 && px.height == 300 && scale == 1.5,
+          why: "${s.width}×${s.height} logical, ${px.width}×${px.height} pixels, scale ${scale}");
+    Size b = backing();
+    check(t: t, name: "the canvas's backing store is the window's pixels", ok: b.width == 480 && b.height == 300,
+          why: "${b.width}×${b.height}");
+    check(t: t, name: "the window sets the canvas's CSS size inline",
+          ok: styleIs(prop: "width", value: "320px") && styleIs(prop: "height", value: "200px"), why: "it does not");
+    check(t: t, name: "the window sets touch-action none, so a touch neither pans nor zooms the page",
+          ok: styleIs(prop: "touchAction", value: "none"), why: "it does not");
+    check(t: t, name: "a canvas with no tabindex gets 0, so Tab can reach it", ok: attrIs(name: "tabindex", value: "0"),
+          why: "it does not");
+    check(t: t, name: "a window opened unfocused leaves the focus where it is", ok: !active(sel: "#canvas"),
+          why: "the canvas has it");
+    expectPumped(t: t, w: w, name: "opening posts nothing", want: "");
+    NativeWindow n = w.nativeHandle();
+    bool canvas = match (n.kind()) { case Canvas: true; case _: false; };
+    string sel = "#canvas";
+    check(t: t, name: "its native handle is the canvas, by its selector",
+          ok: canvas && windowtests_cstr_is(p: cast<UnsafeConstPtr>(n.window()), s: sel.cstr()) == 1, why: "it is not");
+
+    // What follows a size report (decision 6): only what changed is posted. The browser's own report of a ratio's change
+    // is read, not run (windowtests_report_sizes says why).
+    float64 css = 320.0;
+    windowtests_report_sizes(sel: sel.cstr(), width: css, height: 200.0, fw: 640, fh: 400, scale: 2.0);
+    w.pump();
+    float32 two = w.scale();
+    Size twoPx = w.framebufferSize();
+    Size twoCss = w.size();
+    string atTwo = drained(w: w);
+    check(t: t, name: "a new device pixel ratio is a ScaleChanged and no Resize, the pixels following",
+          ok: atTwo == "ScaleChanged 2" && two == 2.0 && twoPx.width == 640 && twoPx.height == 400 && twoCss.width == 320,
+          why: "got `${atTwo}`, scale ${two}, ${twoPx.width}×${twoPx.height} pixels, ${twoCss.width} wide");
+    windowtests_report_sizes(sel: sel.cstr(), width: css, height: 200.0, fw: 481, fh: 301, scale: 2.0);
+    w.pump();
+    Size odd = w.framebufferSize();
+    string pixelsOnly = drained(w: w);
+    check(t: t, name: "new pixels alone post nothing, and framebufferSize follows them",
+          ok: pixelsOnly.isEmpty() && odd.width == 481 && odd.height == 301,
+          why: "got `${pixelsOnly}`, ${odd.width}×${odd.height}");
+    windowtests_report_sizes(sel: sel.cstr(), width: 330.4, height: 200.0, fw: 661, fh: 400, scale: 2.0);
+    expectPumped(t: t, w: w, name: "a new CSS size is a Resize, rounded", want: "Resize 330 200");
+    windowtests_report_sizes(sel: sel.cstr(), width: css, height: 200.0, fw: 480, fh: 300, scale: 1.5);
+    expectPumped(t: t, w: w, name: "and back: the scale first, then the size, as GLFW reports a display change",
+                 want: "ScaleChanged 1.5; Resize 320 200");
+
+    Result<Window, WindowError> again = Window.openWith(title: "again", width: 10, height: 10, options: quietly());
+    match (give again) {
+        case Ok(value: v): { t.verdict(name: "a canvas already a window refuses another", why: "it opened"); }
+        case Err(error: e): {
+            string words = e.message();
+            check(t: t, name: "a canvas already a window refuses another", ok: words == "`#canvas` is already a window",
+                  why: "it says `${words}`");
+        }
+    };
+}
+
+// Decisions 4 and 5: keys are the canvas's while it has the focus, and the window takes the ones it names.
+unsafe fn void keys(ref Tally t, ref Window w) {
+    focusOn(sel: "#canvas");
+    expectPumped(t: t, w: w, name: "the canvas's focus is the window's", want: "Focus true");
+
+    bool downLeft = keyEvent(type: "keydown", code: "KeyW", key: "w", mods: 0);
+    bool upLeft = keyEvent(type: "keyup", code: "KeyW", key: "w", mods: 0);
+    check(t: t, name: "a key the window names is taken from the page: its default is prevented, down and up",
+          ok: !downLeft && !upLeft, why: "the page kept it");
+    expectPumped(t: t, w: w, name: "a key gives its down, the text it types, and its up",
+                 want: "KeyDown 26 0 false; Text 119; KeyUp 26 0");
+
+    bool tab = keyEvent(type: "keydown", code: "Tab", key: "Tab", mods: 0);
+    bool f5 = keyEvent(type: "keydown", code: "F5", key: "F5", mods: 0);
+    bool space = keyEvent(type: "keydown", code: "Space", key: " ", mods: 0);
+    check(t: t, name: "Tab, F5 and Space are the window's too", ok: !tab && !f5 && !space, why: "the page kept one");
+    bool tabUp = keyEvent(type: "keyup", code: "Tab", key: "Tab", mods: 0);
+    bool f5Up = keyEvent(type: "keyup", code: "F5", key: "F5", mods: 0);
+    bool spaceUp = keyEvent(type: "keyup", code: "Space", key: " ", mods: 0);
+    expectPumped(t: t, w: w, name: "Space types a space; Tab and F5 type nothing",
+                 want: "KeyDown 43 0 false; KeyDown 62 0 false; KeyDown 44 0 false; Text 32; KeyUp 43 0; KeyUp 62 0; KeyUp 44 0");
+
+    bool lang = keyEvent(type: "keydown", code: "Lang3", key: "Unidentified", mods: 0);
+    bool langUp = keyEvent(type: "keyup", code: "Lang3", key: "Unidentified", mods: 0);
+    check(t: t, name: "a key the window does not name is left to the page", ok: lang && langUp, why: "it was prevented");
+    expectPumped(t: t, w: w, name: "and arrives as Key::Unknown", want: "KeyDown 0 0 false; KeyUp 0 0");
+
+    bool save = keyEvent(type: "keydown", code: "KeyS", key: "s", mods: 2);
+    bool saveUp = keyEvent(type: "keyup", code: "KeyS", key: "s", mods: 2);
+    check(t: t, name: "Ctrl+S is the program's, not the browser's save", ok: !save && !saveUp, why: "the page kept it");
+    expectPumped(t: t, w: w, name: "Ctrl+S types nothing", want: "KeyDown 22 2 false; KeyUp 22 2");
+
+    bool shifted = keyEvent(type: "keydown", code: "KeyW", key: "W", mods: 1);
+    bool shiftedUp = keyEvent(type: "keyup", code: "KeyW", key: "W", mods: 1);
+    expectPumped(t: t, w: w, name: "Shift+W types W", want: "KeyDown 26 1 false; Text 87; KeyUp 26 1");
+
+    bool altGr = keyEvent(type: "keydown", code: "KeyE", key: "€", mods: 70);   // Control, Alt and AltGraph
+    bool altGrUp = keyEvent(type: "keyup", code: "KeyE", key: "€", mods: 70);
+    expectPumped(t: t, w: w, name: "AltGr+E types what AltGraph made, Control or not",
+                 want: "KeyDown 8 6 false; Text 8364; KeyUp 8 6");
+
+    bool dead = keyEvent(type: "keydown", code: "Quote", key: "Dead", mods: 0);
+    bool deadUp = keyEvent(type: "keyup", code: "Quote", key: "Dead", mods: 0);
+    expectPumped(t: t, w: w, name: "a dead key types nothing", want: "KeyDown 52 0 false; KeyUp 52 0");
+
+    string canvas = "#canvas";
+    bool r1 = keyAt(sel: canvas, type: "keydown", code: "KeyW", key: "w", mods: 0, repeat: 1);
+    bool r2 = keyAt(sel: canvas, type: "keydown", code: "KeyW", key: "w", mods: 0, repeat: 0);
+    bool r3 = keyEvent(type: "keyup", code: "KeyW", key: "w", mods: 0);
+    expectPumped(t: t, w: w, name: "the window says what a repeat is, not the browser",
+                 want: "KeyDown 26 0 false; Text 119; KeyDown 26 0 true; Text 119; KeyUp 26 0");
+
+    // The page's queue keeps the ring's promises between pumps (decision 1): past its cap of 1024 a drop is counted, and
+    // an up is still kept. 1100 downs of a key the window does not name, which it never holds, fill it.
+    bool w1 = keyEvent(type: "keydown", code: "KeyW", key: "w", mods: 0);
+    int32 i = 0;
+    while (i < 1100) { bool u = keyEvent(type: "keydown", code: "Lang3", key: "Unidentified", mods: 0); i = i + 1; }
+    bool w2 = keyEvent(type: "keyup", code: "KeyW", key: "w", mods: 0);
+    expectPumped(t: t, w: w, name: "past the page's queue's cap a drop is counted with the ring's, and a held key's up is kept",
+                 want: "KeyDown 26 0 false; Text 119; KeyDown 0 0 false ×252; KeyUp 26 0; Dropped 848");
+
+    // A blur releases what is held (WIN-2); keys typed in the page's field are the page's.
+    bool held = keyEvent(type: "keydown", code: "KeyW", key: "w", mods: 0);
+    focusOn(sel: "#field");
+    expectPumped(t: t, w: w, name: "the canvas losing the focus releases a held key, then says Focus",
+                 want: "KeyDown 26 0 false; Text 119; KeyUp 26 0; Focus false");
+    string field = "#field";
+    bool typed = keyAt(sel: field, type: "keydown", code: "KeyW", key: "w", mods: 0, repeat: 0);
+    bool typedUp = keyAt(sel: field, type: "keyup", code: "KeyW", key: "w", mods: 0, repeat: 0);
+    check(t: t, name: "keys typed in the page's text field are the page's", ok: typed && typedUp, why: "prevented");
+    expectPumped(t: t, w: w, name: "and never reach the window", want: "");
+}
+
+// Decisions 2, 4, 5 and 9: the page's pointer events as the window's, every button its own down and up.
+unsafe fn void pointers(ref Tally t, ref Window w) {
+    bool down = pointer(type: "pointerdown", id: 1, kind: 0, x: 10.0, y: 20.0, button: 0, buttons: 1);
+    check(t: t, name: "a pointer down is taken from the page (no selection, no drag of the image)", ok: !down,
+          why: "the page kept it");
+    check(t: t, name: "a pointer down focuses the canvas", ok: active(sel: "#canvas"), why: "it does not");
+    w.pump();
+    string first = "";
+    Optional<Event> e = w.pollEvent();
+    match (e) { case Some(value: v): { first = describe(e: v); } case None: { } };
+    check(t: t, name: "the focus comes first, as a native window's activation does", ok: first == "Focus true",
+          why: "got `${first}`");
+    Optional<Pointer> p = nextPointer(w: w);
+    string why = "no pointer event";
+    match (p) {
+        case Some(value: q): {
+            if (q.x == 10.0 && q.y == 20.0 && q.id == 1 && q.buttons == 1) { why = ""; }
+            else { why = "pointer ${q.id} at ${q.x} ${q.y}, buttons ${q.buttons}"; }
+        }
+        case None: { }
+    };
+    check(t: t, name: "a down is where it happened, in the canvas's content box", ok: why.isEmpty(), why: why);
+
+    bool m1 = pointer(type: "pointermove", id: 1, kind: 0, x: 15.0, y: 25.0, button: -1, buttons: 1);
+    bool m2 = pointer(type: "pointermove", id: 1, kind: 0, x: 18.0, y: 25.0, button: 2, buttons: 3);
+    bool m3 = pointer(type: "pointermove", id: 1, kind: 0, x: 18.0, y: 25.0, button: 2, buttons: 1);
+    bool m4 = pointer(type: "pointerup", id: 1, kind: 0, x: 18.0, y: 25.0, button: 0, buttons: 0);
+    expectPumped(t: t, w: w, name: "a second button pressed and let go while one is held is its own down and up, after the move it came with",
+                 want: "PointerMove mouse1 18 25 8 5 [1]; PointerDown mouse1 2 0 [5]; PointerUp mouse1 2 0 [1]; PointerUp mouse1 0 0 [0]");
+
+    bool t1 = pointer(type: "pointerdown", id: 7, kind: 1, x: 5.0, y: 5.0, button: 0, buttons: 1);
+    bool t2 = pointer(type: "pointercancel", id: 7, kind: 1, x: 5.0, y: 5.0, button: -1, buttons: 0);
+    expectPumped(t: t, w: w, name: "a touch the browser takes is cancelled",
+                 want: "PointerDown touch7 0 0 [1]; PointerCancel touch7 [0]");
+
+    string sel = "#canvas";
+    string penDown = "pointerdown";
+    bool pd = windowtests_pointer(sel: sel.cstr(), type: penDown.cstr(), id: 2, kind: 2, x: 40.0, y: 30.0, button: 0,
+                                  buttons: 1, pressure: 0.625, tilt_x: 30.0, tilt_y: -20.0, twist: 45.0, width: 2.0,
+                                  height: 3.0, primary: 1) == 1;
+    w.pump();
+    Optional<Pointer> pen = nextPointer(w: w);
+    string penWhy = "no pointer event";
+    match (pen) {
+        case Some(value: q): {
+            bool kept = q.pressure == 0.625 && q.tiltX == 30.0 && q.tiltY == -20.0 && q.twist == 45.0 &&
+                        q.width == 2.0 && q.height == 3.0 && q.primary;
+            if (kept) { penWhy = ""; }
+            else { penWhy = "pressure ${q.pressure}, tilt ${q.tiltX} ${q.tiltY}, twist ${q.twist}, ${q.width} × ${q.height}"; }
+        }
+        case None: { }
+    };
+    check(t: t, name: "a pen's pressure, tilt, twist and size reach the program", ok: penWhy.isEmpty(), why: penWhy);
+    bool pu = pointer(type: "pointerup", id: 2, kind: 2, x: 40.0, y: 30.0, button: 0, buttons: 0);
+    expectPumped(t: t, w: w, name: "and its up", want: "PointerUp pen2 0 0 [0]");
+
+    bool enter = pointer(type: "pointerenter", id: 1, kind: 0, x: 1.0, y: 1.0, button: -1, buttons: 0);
+    bool leave = pointer(type: "pointerleave", id: 1, kind: 0, x: -1.0, y: 1.0, button: -1, buttons: 0);
+    expectPumped(t: t, w: w, name: "a pointer entering and leaving the canvas",
+                 want: "PointerEnter mouse1 [0]; PointerLeave mouse1 [0]");
+
+    bool a1 = pointer(type: "pointermove", id: 1, kind: 0, x: 1.0, y: 1.0, button: -1, buttons: 0);
+    bool a2 = pointer(type: "pointermove", id: 9, kind: 1, x: 2.0, y: 2.0, button: -1, buttons: 0);
+    bool a3 = pointer(type: "pointermove", id: 1, kind: 0, x: 3.0, y: 3.0, button: -1, buttons: 0);
+    expectPumped(t: t, w: w, name: "two pointers' moves do not coalesce across each other in the page's queue either",
+                 want: "PointerMove mouse1 1 1 2 0 [0]; PointerMove touch9 2 2 0 0 [0]; PointerMove mouse1 3 3 2 2 [0]");
+
+    bool menu = windowtests_context_menu(sel: sel.cstr()) == 1;
+    check(t: t, name: "the context menu is taken from the page, so the right button is the program's", ok: !menu,
+          why: "the page kept it");
+
+    bool w1 = windowtests_wheel(sel: sel.cstr(), dx: 0.0, dy: 100.0, mode: 0) == 1;
+    bool w2 = windowtests_wheel(sel: sel.cstr(), dx: 0.0, dy: 3.0, mode: 1) == 1;
+    bool w3 = windowtests_wheel(sel: sel.cstr(), dx: 10.0, dy: 0.0, mode: 0) == 1;
+    bool w4 = windowtests_wheel(sel: sel.cstr(), dx: 0.0, dy: 1.0, mode: 2) == 1;
+    check(t: t, name: "a wheel over the canvas is taken from the page", ok: !w1 && !w2 && !w3 && !w4,
+          why: "the page kept one");
+    expectPumped(t: t, w: w, name: "a wheel in pixels, lines, or a page's worth of the canvas's height, up and left positive",
+                 want: "Scroll 0 -100 pixels; Scroll 0 -3 lines; Scroll -10 -200 pixels");
+
+    // A focus change cancels a held touch (decision 2.3).
+    bool held = pointer(type: "pointerdown", id: 8, kind: 1, x: 5.0, y: 5.0, button: 0, buttons: 1);
+    focusOn(sel: "#field");
+    expectPumped(t: t, w: w, name: "the canvas losing the focus cancels a held touch",
+                 want: "PointerDown touch8 0 0 [1]; PointerCancel touch8 [0]; Focus false");
+}
+
+// Decisions 5 and 7: the cursor's mode on the canvas.
+unsafe fn void cursor(ref Tally t, ref Window w) {
+    w.setCursor(mode: CursorMode::Hidden);
+    bool hidden = styleIs(prop: "cursor", value: "none");
+    w.setCursor(mode: CursorMode::Normal);
+    bool shown = styleIs(prop: "cursor", value: "");
+    check(t: t, name: "a hidden cursor is the canvas's cursor none, and Normal gives back the page's",
+          ok: hidden && shown, why: "hidden ${hidden}, back ${shown}");
+    w.setCursor(mode: CursorMode::Locked);
+    expectPumped(t: t, w: w, name: "a lock asked for outside a gesture waits for a click: nothing yet", want: "");
+    w.setCursor(mode: CursorMode::Normal);
+}
+
+// Decision 3: closing gives back what the window set, and the canvas can be a window again.
+unsafe fn void closing(ref Tally t, Window w) {
+    {
+        Window gone = give w;
+    }
+    check(t: t, name: "closing gives back the canvas's CSS size, touch-action and tabindex",
+          ok: styleIs(prop: "width", value: "") && styleIs(prop: "touchAction", value: "") &&
+              attrIs(name: "tabindex", value: "(none)"), why: "something stayed");
+    bool kept = keyEvent(type: "keydown", code: "KeyW", key: "w", mods: 0);
+    check(t: t, name: "a closed window's listeners are gone: the page's keys are its own again", ok: kept,
+          why: "prevented");
+    Result<Window, WindowError> made = Window.open(title: "focused", width: 320, height: 200);
+    match (give made) {
+        case Ok(value: v): {
+            Window w2 = give v;
+            check(t: t, name: "a window opened with the default options takes the focus", ok: active(sel: "#canvas"),
+                  why: "the canvas does not have it");
+            expectPumped(t: t, w: w2, name: "and posts nothing for it, as a native window opening focused does", want: "");
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "the canvas is a window again once closed", why: why);
+        }
+    };
+}
+
+// Question 11 (AGENTS.window.md item 8): `Window.openIn` names the canvas, and several canvases are several windows,
+// each with its own queue.
+unsafe fn void canvases(ref Tally t) {
+    string missing = refusal(canvas: "#nope");
+    check(t: t, name: "a selector nothing on the page matches is refused, in those words",
+          ok: missing == "no element on the page matches `#nope`", why: "it says `${missing}`");
+    string plain = refusal(canvas: "#plain");
+    check(t: t, name: "an element that is not a canvas is refused, in those words",
+          ok: plain == "`#plain` is not a canvas", why: "it says `${plain}`");
+    string invalid = refusal(canvas: "##");
+    check(t: t, name: "a selector the page cannot read matches nothing",
+          ok: invalid == "no element on the page matches `##`", why: "it says `${invalid}`");
+
+    focusOn(sel: "#field");
+    Result<Window, WindowError> first = Window.openWith(title: "first", width: 320, height: 200, options: quietly());
+    Result<Window, WindowError> second = Window.openIn(canvas: "#second", title: "second", width: 100, height: 50,
+                                                       options: quietly());
+    Window a = match (give first) {
+        case Ok(value: v): give v;
+        case Err(error: e): { string why = e.message(); t.verdict(name: "two canvases are two windows", why: why); return; }
+    };
+    Window b = match (give second) {
+        case Ok(value: v): give v;
+        case Err(error: e): { string why = e.message(); t.verdict(name: "two canvases are two windows", why: why); return; }
+    };
+    t.verdict(name: "two canvases are two windows", why: "");
+    Size bs = b.size();
+    Size bp = b.framebufferSize();
+    check(t: t, name: "a window on a named canvas has its own size and pixels",
+          ok: bs.width == 100 && bs.height == 50 && bp.width == 150 && bp.height == 75,
+          why: "${bs.width}×${bs.height} logical, ${bp.width}×${bp.height} pixels");
+    check(t: t, name: "a canvas's own tabindex is kept", ok: attrOf(sel: "#second", name: "tabindex", value: "-1"),
+          why: "it was changed");
+    NativeWindow n = b.nativeHandle();
+    string sel = "#second";
+    check(t: t, name: "its native handle is its own selector",
+          ok: windowtests_cstr_is(p: cast<UnsafeConstPtr>(n.window()), s: sel.cstr()) == 1, why: "it is not");
+
+    bool down = mouseAt(sel: "#second", type: "pointerdown", x: 4.0, y: 5.0, button: 0, buttons: 1);
+    bool up = mouseAt(sel: "#second", type: "pointerup", x: 4.0, y: 5.0, button: 0, buttons: 0);
+    a.pump();
+    expectDrained(t: t, w: a, name: "another canvas's events are not this window's", want: "");
+    expectDrained(t: t, w: b, name: "each canvas's events go to its own window, and one pump takes every window's",
+                  want: "Focus true; PointerDown mouse1 0 0 [1]; PointerUp mouse1 0 0 [0]");
+    {
+        Window gone = give b;
+    }
+    check(t: t, name: "closing a named canvas's window gives it back as it was",
+          ok: attrOf(sel: "#second", name: "tabindex", value: "-1") && styleOf(sel: "#second", prop: "width", value: "") &&
+              styleOf(sel: "#second", prop: "touchAction", value: ""),
+          why: "something stayed");
+
+    // Decision 6: a canvas the page lays out keeps its layout, and its pixels follow it.
+    WindowOptions paged = quietly();
+    paged.sizedByPage = true;
+    Result<Window, WindowError> third = Window.openIn(canvas: "#paged", title: "paged", width: 999, height: 999,
+                                                      options: paged);
+    match (give third) {
+        case Ok(value: v): {
+            Window p = give v;
+            Size ps = p.size();
+            Size pp = p.framebufferSize();
+            check(t: t, name: "with sizedByPage, the page's layout is the size, and width and height go unused",
+                  ok: ps.width == 200 && ps.height == 100 && pp.width == 300 && pp.height == 150,
+                  why: "${ps.width}×${ps.height} logical, ${pp.width}×${pp.height} pixels");
+            check(t: t, name: "and the canvas's own CSS size is left alone", ok: styleOf(sel: "#paged", prop: "width", value: ""),
+                  why: "an inline width was set");
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "with sizedByPage, the page's layout is the size, and width and height go unused", why: why);
+        }
+    };
+}
+
+unsafe fn void webWindow(ref Tally t) {
+    if (windowtests_in_browser() != 1) { noPage(t: t); return; }
+    Result<Window, WindowError> made = Window.openWith(title: "ignored on the web", width: 320, height: 200,
+                                                       options: quietly());
+    Window w = match (give made) {
+        case Ok(value: v): give v;
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "in a browser, a window opens on the page's #canvas", why: why);
+            return;
+        }
+    };
+    t.verdict(name: "in a browser, a window opens on the page's #canvas", why: "");
+    openedCases(t: t, w: w);
+    keys(t: t, w: w);
+    pointers(t: t, w: w);
+    cursor(t: t, w: w);
+    closing(t: t, w: give w);
+    canvases(t: t);
+}
+
+// ---- over the browser's own time and input ---------------------------------------------------------------------------
+
+// The trusted cases, one step a tick. A step checks what the last one's requests did, then makes its own: a request is
+// printed for tools/webtest.mjs, and the next step waits for it to be done and for a few frames more.
+type resource WebRun implements App {
+    Tally tally;
+    Window window;
+    int32 step = 0;
+    int32 seq = 0;
+    int32 awaited = 0;
+    int32 settle = 0;
+    int32 ticks = 0;
+
+    public ctor make(Tally tally, Window window) {
+        this.tally = give tally;
+        this.window = give window;
+    }
+
+    public fn bool tick() { return this.next(); }
+    public fn void lifecycle(Lifecycle event) { }
+
+    // A request to the driver; the next step waits for it.
+    fn void request(const ref string what) {
+        this.seq = this.seq + 1;
+        int32 n = this.seq;
+        println(s: "webtest: ${n} ${what}");
+        this.awaited = n;
+        this.settle = 3;
+    }
+
+    unsafe fn bool next() {
+        this.ticks = this.ticks + 1;
+        if (this.ticks > 3600) {
+            this.tally.verdict(name: "the browser's steps finish", why: "stuck at step ${this.step}");
+            return this.done();
+        }
+        if (windowtests_acked() < this.awaited) { return true; }
+        if (this.settle > 0) { this.settle = this.settle - 1; return true; }
+        this.step = this.step + 1;
+        return this.run();
+    }
+
+    unsafe fn bool done() {
+        uint8 code = summary(t: this.tally);
+        quit(code: code);
+        return false;
+    }
+
+    unsafe fn bool run() {
+        int32 s = this.step;
+        if (s == 1) {
+            this.settle = 4;
+            return true;
+        }
+        if (s == 2) {
+            expectPumped(t: this.tally, w: this.window, name: "the canvas's first ResizeObserver report, at its open size, posts nothing",
+                         want: "");
+            setStyle(prop: "width", value: "400px");
+            this.settle = 4;
+            return true;
+        }
+        if (s == 3) {
+            expectPumped(t: this.tally, w: this.window, name: "the page resizing the canvas is a Resize, from its ResizeObserver",
+                         want: "Resize 400 200");
+            Size sz = this.window.size();
+            Size px = this.window.framebufferSize();
+            Size b = backing();
+            check(t: this.tally, name: "and its pixels follow, exact from the device-pixel box",
+                  ok: sz.width == 400 && px.width == 600 && px.height == 300 && b.width == 600,
+                  why: "${sz.width} logical, ${px.width}×${px.height} pixels, backing ${b.width}");
+            this.request(what: "click #canvas 30 30");
+            return true;
+        }
+        if (s == 4) {
+            string got = pumped(w: this.window);
+            println(s: "measured: a trusted click on an unfocused canvas gives `${got}`");
+            check(t: this.tally, name: "a real click focuses the canvas, then gives its down and up",
+                  ok: got.contains(substring: "Focus true; ") && got.contains(substring: "PointerDown mouse1 0 0 [1]; PointerUp mouse1 0 0 [0]"),
+                  why: "got `${got}`");
+            this.request(what: "key tap KeyW w 87");
+            this.request(what: "key tap Tab Tab 9");
+            return true;
+        }
+        if (s == 5) {
+            expectPumped(t: this.tally, w: this.window, name: "real keys reach the canvas, and Tab stays in it",
+                         want: "KeyDown 26 0 false; Text 119; KeyUp 26 0; KeyDown 43 0 false; KeyUp 43 0");
+            check(t: this.tally, name: "the canvas keeps the focus after Tab", ok: active(sel: "#canvas"),
+                  why: "it lost it");
+            focusOn(sel: "#field");
+            this.request(what: "key down KeyS s 83");
+            return true;
+        }
+        if (s == 6) {
+            focusOn(sel: "#canvas");
+            this.request(what: "key up KeyS s 83");
+            return true;
+        }
+        if (s == 7) {
+            expectPumped(t: this.tally, w: this.window,
+                         name: "a key pressed in the page's field and let go on the canvas: its up is dropped (item 5, measured)",
+                         want: "Focus false; Focus true");
+            this.request(what: "press #canvas 10 10");
+            this.request(what: "move #canvas 10 260");      // below the canvas, over the page's next element
+            this.request(what: "release #canvas 10 260");
+            return true;
+        }
+        if (s == 8) {
+            string got = pumped(w: this.window);
+            println(s: "measured: a drag out of the canvas gives `${got}`");
+            check(t: this.tally, name: "a drag released outside the canvas still ends in its up (pointer capture)",
+                  ok: got.contains(substring: "PointerUp mouse1 0 0 [0]"), why: "got `${got}`");
+            this.request(what: "touch #canvas 20 20 80 20 4");
+            return true;
+        }
+        if (s == 9) {
+            string got = pumped(w: this.window);
+            println(s: "measured: a touch drag gives `${got}`");
+            check(t: this.tally, name: "a real touch drag over the canvas is the program's: its moves, its up, no cancel",
+                  ok: got.contains(substring: "PointerDown touch") && got.contains(substring: "PointerMove touch") &&
+                      got.contains(substring: "PointerUp touch") && !got.contains(substring: "PointerCancel"),
+                  why: "got `${got}`");
+            this.window.setCursor(mode: CursorMode::Locked);
+            this.request(what: "click #canvas 20 20");
+            return true;
+        }
+        if (s == 10) {
+            string got = pumped(w: this.window);
+            check(t: this.tally, name: "a lock asked for takes at the next click", ok: got.contains(substring: "PointerLock true"),
+                  why: "got `${got}`");
+            string sel = "#canvas";
+            check(t: this.tally, name: "and the canvas is the page's locked element", ok: windowtests_locked(sel: sel.cstr()) == 1,
+                  why: "it is not");
+            this.request(what: "move #canvas 50 20");
+            return true;
+        }
+        if (s == 11) {
+            this.window.pump();
+            Optional<Event> e = this.window.pollEvent();
+            string why = "no event";
+            match (e) {
+                case Some(value: v): {
+                    match (v) {
+                        case PointerMove(pointer: q, dx: dx, dy: dy): {
+                            println(s: "measured: locked, a move of 30 CSS pixels is dx ${dx}, at ${q.x} ${q.y}");
+                            // A trusted position at a scale of 1.5 comes back within a millionth of a pixel.
+                            bool still = q.x > 19.99 && q.x < 20.01 && q.y > 19.99 && q.y < 20.01;
+                            if (dx > 0.0 && still) { why = ""; }
+                            else { why = "dx ${dx} at ${q.x} ${q.y}"; }
+                        }
+                        case _: { why = describe(e: v); }
+                    };
+                }
+                case None: { }
+            };
+            check(t: this.tally, name: "locked, the pointer stands still and its motion is in dx", ok: why.isEmpty(), why: why);
+            string rest = drained(w: this.window);
+            this.request(what: "key tap Escape Escape 27");
+            return true;
+        }
+        if (s == 12) {
+            expectPumped(t: this.tally, w: this.window,
+                         name: "Escape is the browser's while locked: it gives the lock back, and the program sees no Escape",
+                         want: "PointerLock false");
+            this.request(what: "wait 1600");
+            this.request(what: "click #canvas 20 20");
+            return true;
+        }
+        if (s == 13) {
+            string got = pumped(w: this.window);
+            check(t: this.tally, name: "the browser giving the lock back sets the mode to Normal: the next click does not lock",
+                  ok: !got.contains(substring: "PointerLock"), why: "got `${got}`");
+            return this.done();
+        }
+        return this.done();
+    }
+}
+
+// In a browser, the steps that take the browser's time, as an App; the summary is printed when they are done. Under
+// node, the summary now.
+unsafe fn uint8 webFinish(Tally t) {
+    if (windowtests_in_browser() != 1) { return summary(t: t); }
+    Result<Window, WindowError> made = Window.openWith(title: "web", width: 320, height: 200, options: quietly());
+    match (give made) {
+        case Ok(value: w): {
+            Owned<App> app = new WebRun.make(tally: give t, window: give w);
+            run(app: give app);
+            return 0;
+        }
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a window opens for the browser's steps", why: why);
+            return summary(t: t);
+        }
+    };
+}

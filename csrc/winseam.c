@@ -1,8 +1,10 @@
 // winseam.c: the seam's bodies (winseam.h says what it is). The ring and the headless window are the same on every
-// leg; natively a GLFW window fills the ring from its callbacks. The web's html5 half is not built yet: on the web
-// `winseam_open` fails, saying so, and a headless window works.
+// leg. Natively a GLFW window fills the ring from its callbacks; on the web a canvas's listeners, in the package's JS
+// library (js/winseam.js), queue records that `winseam_pump` pulls into the ring (AGENTS.window.md item 8).
 #include "winseam.h"
 
+#include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -44,6 +46,8 @@ struct winseam_window {
     int32_t pointer_count;
     int32_t held_count;      // keys, and each pointer's buttons, held: the ring keeps a slot for each one's end
     int32_t lock_bits;       // CapsLock and NumLock, as the last key or button event reported them
+    char *selector;          // on the web, the canvas's selector, which the native handle points at; NULL otherwise
+    int32_t canvas;          // on the web, the JS library's index for the window
 #ifndef __EMSCRIPTEN__
     GLFWwindow *glfw;
 #endif
@@ -351,8 +355,7 @@ int32_t winseam_headless_p(winseam_window *w) {
 #ifndef __EMSCRIPTEN__
     return w->glfw == NULL;
 #else
-    (void)w;
-    return 1;
+    return w->selector == NULL;
 #endif
 }
 
@@ -548,8 +551,9 @@ static void on_close(GLFWwindow *g) {
     push_simple(of(g), WINSEAM_CLOSE_REQUESTED, 0, 0, 0);
 }
 
-winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
-                             int32_t capacity, int32_t *why_length) {
+winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, const char *canvas,
+                             int32_t sized_by_page, uint8_t *why, int32_t capacity, int32_t *why_length) {
+    (void)canvas; (void)sized_by_page;   // the web's
     *why_length = 0;
     if (g_glfw_users == 0 && !glfwInit()) {
         const char *description = NULL;
@@ -683,31 +687,127 @@ void *winseam_native_window(winseam_window *w) {
 }
 
 #else
-// ---- the web: not built yet (KR-26's commit 2, html5 callbacks on #canvas) -------------------------------------------
+// ---- the web: a window on the page's canvas (AGENTS.window.md item 8) ------------------------------------------------
+
+// js/winseam.js writes records in this layout, at these offsets.
+_Static_assert(offsetof(winseam_event, x) == 16, "js/winseam.js writes winseam_event's layout");
+_Static_assert(offsetof(winseam_event, pointer) == 48, "js/winseam.js writes winseam_event's layout");
+_Static_assert(offsetof(winseam_event, pressure) == 64, "js/winseam.js writes winseam_event's layout");
+_Static_assert(offsetof(winseam_event, height) == 84, "js/winseam.js writes winseam_event's layout");
+_Static_assert(sizeof(winseam_event) == 88, "js/winseam.js writes winseam_event's layout");
+
+// js/winseam.js's own record, never in the ring: the canvas's sizes, which become Resize and ScaleChanged when they
+// change. a: CSS width, b: CSS height (rounded), x: the device pixel ratio, dx and dy: the pixels.
+#define WEB_SIZES 100
+
+// js/winseam.js's.
+extern int32_t winseam_web_open(winseam_window *record, const char *selector, int32_t width, int32_t height,
+                                int32_t focused, int32_t sized_by_page, int32_t *sizes, float *scale);
+extern void winseam_web_close(int32_t index);
+extern winseam_window *winseam_web_pull(winseam_event *into);
+extern void winseam_web_set_cursor(int32_t index, int32_t mode);
 
 int32_t winseam_glfw_key_to_hid(int32_t k) { (void)k; return 0; }
 int32_t winseam_glfw_button_to_pointer(int32_t b) { (void)b; return -1; }
 
-winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
-                             int32_t capacity, int32_t *why_length) {
-    (void)title; (void)width; (void)height; (void)focused;
-    *why_length = copy_text("@kama/window has no web window yet: only a headless one", why, capacity);
-    return NULL;
+// The title is the page's: a canvas may be one part of a page (decision 3.2).
+winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, const char *canvas,
+                             int32_t sized_by_page, uint8_t *why, int32_t capacity, int32_t *why_length) {
+    (void)title;
+    *why_length = 0;
+    winseam_window *w = new_record();
+    size_t n = strlen(canvas);
+    char *selector = (char *)malloc(n + 1);
+    if (w == NULL || selector == NULL) {
+        free(selector);
+        if (w != NULL) free_record(w);
+        *why_length = copy_text("out of memory", why, capacity);
+        return NULL;
+    }
+    memcpy(selector, canvas, n + 1);
+    int32_t sizes[4] = { 0, 0, 0, 0 };
+    float scale = 1.0f;
+    int32_t index = winseam_web_open(w, canvas, width, height, focused, sized_by_page, sizes, &scale);
+    if (index < 0) {
+        char words[512];
+        if (index == -1) snprintf(words, sizeof words, "no page: a window opens on a canvas, and this program is not running in a browser");
+        else if (index == -2) snprintf(words, sizeof words, "no element on the page matches `%s`", canvas);
+        else if (index == -3) snprintf(words, sizeof words, "`%s` is not a canvas", canvas);
+        else snprintf(words, sizeof words, "`%s` is already a window", canvas);
+        *why_length = copy_text(words, why, capacity);
+        free(selector);
+        free_record(w);
+        return NULL;
+    }
+    w->selector = selector;
+    w->canvas = index;
+    w->width = sizes[0]; w->height = sizes[1];
+    w->fb_width = sizes[2]; w->fb_height = sizes[3];
+    w->scale = scale;
+    return w;
 }
 
-static void system_close(winseam_window *w) { (void)w; }
-static void system_destroy(winseam_window *w) { (void)w; }
-void winseam_pump(winseam_window *w) { (void)w; }
+// Closed as the user sees it: the canvas's listeners go, and what the window set on it is given back. The selector the
+// native handle points at stays until the record's last holder goes.
+static void system_close(winseam_window *w) {
+    if (w->selector != NULL) winseam_web_close(w->canvas);
+}
 
+static void system_destroy(winseam_window *w) {
+    free(w->selector);
+    w->selector = NULL;
+}
+
+// A record from js/winseam.js: the sizes become the events of what changed; the queue's own drop is counted into the
+// ring's; the browser giving the lock back sets the mode to Normal (decision 7); the rest is what any system sends.
+static void web_take(winseam_window *w, const winseam_event *e) {
+    if (e->kind == WEB_SIZES) {
+        float scale = (float)e->x;
+        w->fb_width = (int32_t)e->dx;
+        w->fb_height = (int32_t)e->dy;
+        if (scale != w->scale) {
+            w->scale = scale;
+            winseam_event s;
+            memset(&s, 0, sizeof s);
+            s.kind = WINSEAM_SCALE_CHANGED;
+            s.x = (double)scale;
+            push(w, &s);
+        }
+        if (e->a != w->width || e->b != w->height) {
+            w->width = e->a;
+            w->height = e->b;
+            push_simple(w, WINSEAM_RESIZE, e->a, e->b, 0);
+        }
+        return;
+    }
+    if (e->kind == WINSEAM_DROPPED) { count_drop(w, e->a); return; }
+    if (e->kind == WINSEAM_POINTER_LOCK && !e->a) w->cursor_mode = 0;
+    take(w, e);
+}
+
+// Every canvas window's queue, as `glfwPollEvents` takes every GLFW window's.
+void winseam_pump(winseam_window *w) {
+    if (w->selector == NULL) return;
+    winseam_event e;
+    winseam_window *target;
+    while ((target = winseam_web_pull(&e)) != NULL) web_take(target, &e);
+}
+
+// On a canvas, the browser says when a lock takes and when it goes (decision 7): a lock is asked for at the next
+// pointer down, and PointerLock comes from the browser. Headless, at once.
 void winseam_set_cursor(winseam_window *w, int32_t mode) {
     int32_t was = w->cursor_mode;
     w->cursor_mode = mode;
+    if (w->selector != NULL) {
+        winseam_web_set_cursor(w->canvas, mode);
+        return;
+    }
     if ((mode == 2) != (was == 2)) push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0);
 }
 
-int32_t winseam_native_kind(winseam_window *w) { (void)w; return 0; }
+int32_t winseam_native_kind(winseam_window *w) { return w->selector != NULL ? 5 : 0; }
 void *winseam_native_display(winseam_window *w) { (void)w; return NULL; }
-void *winseam_native_window(winseam_window *w) { (void)w; return NULL; }
+void *winseam_native_window(winseam_window *w) { return w->selector; }
 #endif
 
 // ---- the record's holders, on every leg -------------------------------------------------------------------------------
