@@ -19,5 +19,12 @@ int32_t windowtests_focus_on_show(void *hwnd);
 // Whether the next windows opened are shown (GLFW_VISIBLE): GLFW keeps the hint until it terminates. It brings GLFW up
 // if no window has; nothing off Windows.
 void windowtests_shown_next(int32_t shown);
+// Sends `hwnd` a key message as the system would: WM_KEYDOWN, or WM_KEYUP when `up`, for the virtual key `vk` with its
+// scan code. GLFW's window procedure handles it at once, whether or not the window has the focus. 1 when sent; -1 off
+// Windows.
+int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up);
+// Sends `hwnd` WM_SETFOCUS when `focused`, else WM_KILLFOCUS: GLFW's window procedure runs its focus path, while the
+// window neither takes nor gives up the real focus. 1 when sent; -1 off Windows.
+int32_t windowtests_send_focus(void *hwnd, int32_t focused);
 
 #endif

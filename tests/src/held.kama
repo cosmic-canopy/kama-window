@@ -1,0 +1,369 @@
+// WIN-2: held keys and buttons released on a focus change (AGENTS.window.md item 5). The window keeps what is held, so
+// every up the consumer sees follows its down, and every down it sees is followed in time by its up.
+//
+// The headless cases post what a system would send: a posted event moves the held set as the system's does (decision
+// 5), so they run on every leg with no display. The system-window case sends Win32 messages to a hidden window, so
+// GLFW's own focus path runs while the window never has or takes the focus (decision 6).
+
+import {
+    core::println,
+    core::env::envOr,
+    Tally, describe, quietly,
+    window::Window, window::WindowError, window::Event, window::Key, window::MouseButton, window::CursorMode,
+    window::NativeWindow,
+};
+export { heldCases, heldSystem };
+
+extern "hooks.h";
+extern fn int32 windowtests_win32();
+extern fn int32 windowtests_send_key(UnsafePtr hwnd, int32 vk, int32 up);
+extern fn int32 windowtests_send_focus(UnsafePtr hwnd, int32 focused);
+extern fn int32 windowtests_is_visible(UnsafePtr hwnd);
+extern fn int32 windowtests_is_foreground(UnsafePtr hwnd);
+extern fn void windowtests_shown_next(int32 shown);
+
+// `all` with `run` copies of `one` added: "one" once, "one ×n" for a run.
+fn string joined(const ref string all, const ref string one, int32 run) {
+    if (run == 0) { return copy all; }
+    string item = copy one;
+    if (run > 1) { item = "${one} ×${run}"; }
+    if (all.isEmpty()) { return item; }
+    return "${all}; ${item}";
+}
+
+// Every event in the queue, oldest first, joined by "; ", a run of one event written once with its count ("Text 120
+// ×253"); "" when it is empty.
+unsafe fn string drained(ref Window w) {
+    string all = "";
+    string last = "";
+    int32 run = 0;
+    bool reading = true;
+    while (reading) {
+        Optional<Event> e = w.pollEvent();
+        match (e) {
+            case Some(value: v): {
+                string one = describe(e: v);
+                if (run > 0 && one == last) { run = run + 1; }
+                else { all = joined(all: all, one: last, run: run); last = copy one; run = 1; }
+            }
+            case None: { reading = false; }
+        };
+    }
+    return joined(all: all, one: last, run: run);
+}
+
+unsafe fn void expectDrained(ref Tally t, ref Window w, const ref string name, const ref string want) {
+    string got = drained(w: w);
+    if (got == want) { t.verdict(name: name, why: ""); }
+    else { t.verdict(name: name, why: "got `${got}`, not `${want}`"); }
+}
+
+// `count` typed characters, which no held-set rule touches: what fills a ring here.
+unsafe fn void fill(ref Window w, int32 count) {
+    int32 i = 0;
+    while (i < count) { w.post(event: Event::Text(c: 'x')); i = i + 1; }
+}
+
+unsafe fn void down(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyDown(key: key, mods: mods, repeat: false)); }
+unsafe fn void up(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyUp(key: key, mods: mods)); }
+unsafe fn void button(ref Window w, MouseButton which, bool pressed, uint8 mods) {
+    w.post(event: Event::MouseButton(button: which, down: pressed, mods: mods));
+}
+unsafe fn void focus(ref Window w, bool focused) { w.post(event: Event::Focus(focused: focused)); }
+
+// Decision 1: an up for what the window does not hold is dropped, and the window, not the system, says what a repeat is.
+unsafe fn void pairing(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    up(w: a, key: Key::KeyW, mods: 0);
+    expectDrained(t: t, w: a, name: "an up for a key never down is dropped", want: "");
+
+    Window b = Window.headless(width: 64, height: 64);
+    b.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true));
+    expectDrained(t: t, w: b, name: "a down for a key not held is a press, though the system called it a repeat",
+                  want: "KeyDown 26 0 false");
+
+    Window c = Window.headless(width: 64, height: 64);
+    down(w: c, key: Key::KeyW, mods: 0);
+    down(w: c, key: Key::KeyW, mods: 0);
+    expectDrained(t: t, w: c, name: "a down for a held key is a repeat, though the system called it a press",
+                  want: "KeyDown 26 0 false; KeyDown 26 0 true");
+
+    Window d = Window.headless(width: 64, height: 64);
+    down(w: d, key: Key::KeyW, mods: 0);
+    up(w: d, key: Key::KeyW, mods: 0);
+    up(w: d, key: Key::KeyW, mods: 0);
+    expectDrained(t: t, w: d, name: "a key's up is delivered once, and a second up is dropped",
+                  want: "KeyDown 26 0 false; KeyUp 26 0");
+
+    Window e = Window.headless(width: 64, height: 64);
+    down(w: e, key: Key::KeyW, mods: 0);
+    up(w: e, key: Key::KeyW, mods: 0);
+    e.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true));
+    expectDrained(t: t, w: e, name: "a released key's next down is a press again",
+                  want: "KeyDown 26 0 false; KeyUp 26 0; KeyDown 26 0 false");
+
+    Window f = Window.headless(width: 64, height: 64);
+    down(w: f, key: Key::KeyW, mods: 0);
+    down(w: f, key: Key::KeyS, mods: 0);
+    up(w: f, key: Key::KeyW, mods: 0);
+    up(w: f, key: Key::KeyS, mods: 0);
+    expectDrained(t: t, w: f, name: "each key is held apart from the others",
+                  want: "KeyDown 26 0 false; KeyDown 22 0 false; KeyUp 26 0; KeyUp 22 0");
+
+    Window g = Window.headless(width: 64, height: 64);
+    button(w: g, which: MouseButton::Left, pressed: false, mods: 0);
+    expectDrained(t: t, w: g, name: "an up for a button never down is dropped", want: "");
+
+    Window h = Window.headless(width: 64, height: 64);
+    button(w: h, which: MouseButton::Left, pressed: true, mods: 0);
+    button(w: h, which: MouseButton::Left, pressed: true, mods: 0);
+    button(w: h, which: MouseButton::Left, pressed: false, mods: 0);
+    button(w: h, which: MouseButton::Left, pressed: false, mods: 0);
+    expectDrained(t: t, w: h, name: "a second down for a held button is dropped, and its up delivered once",
+                  want: "MouseButton 0 true 0; MouseButton 0 false 0");
+
+    Window k = Window.headless(width: 64, height: 64);
+    button(w: k, which: MouseButton::Left, pressed: true, mods: 0);
+    button(w: k, which: MouseButton::Right, pressed: true, mods: 0);
+    button(w: k, which: MouseButton::Left, pressed: false, mods: 0);
+    button(w: k, which: MouseButton::Right, pressed: false, mods: 0);
+    expectDrained(t: t, w: k, name: "each button is held apart from the others",
+                  want: "MouseButton 0 true 0; MouseButton 1 true 0; MouseButton 0 false 0; MouseButton 1 false 0");
+}
+
+// Decision 2: `Key::Unknown` names many keys, so the window never holds it.
+unsafe fn void unknownKeys(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    down(w: a, key: Key::Unknown, mods: 0);
+    a.post(event: Event::KeyDown(key: Key::Unknown, mods: 0, repeat: true));
+    up(w: a, key: Key::Unknown, mods: 0);
+    up(w: a, key: Key::Unknown, mods: 0);
+    expectDrained(t: t, w: a, name: "an unknown key's downs and ups pass as the system sends them",
+                  want: "KeyDown 0 0 false; KeyDown 0 0 true; KeyUp 0 0 ×2");
+
+    Window b = Window.headless(width: 64, height: 64);
+    down(w: b, key: Key::Unknown, mods: 0);
+    focus(w: b, focused: false);
+    expectDrained(t: t, w: b, name: "a focus change releases no unknown key", want: "KeyDown 0 0 false; Focus false");
+}
+
+// Decision 3: on a focus change, either way, held buttons go up, then held keys by HID id, each up carrying the
+// modifiers still held after it; then the pointer lock a loss undoes; then `Focus`.
+unsafe fn void release(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    down(w: a, key: Key::KeyW, mods: 0);
+    focus(w: a, focused: false);
+    expectDrained(t: t, w: a, name: "a focus loss releases a held key, then says Focus",
+                  want: "KeyDown 26 0 false; KeyUp 26 0; Focus false");
+
+    Window b = Window.headless(width: 64, height: 64);
+    down(w: b, key: Key::KeyW, mods: 0);
+    focus(w: b, focused: true);
+    expectDrained(t: t, w: b, name: "a focus gain releases a held key too",
+                  want: "KeyDown 26 0 false; KeyUp 26 0; Focus true");
+
+    Window c = Window.headless(width: 64, height: 64);
+    button(w: c, which: MouseButton::Left, pressed: true, mods: 0);
+    focus(w: c, focused: false);
+    expectDrained(t: t, w: c, name: "a focus loss releases a held button",
+                  want: "MouseButton 0 true 0; MouseButton 0 false 0; Focus false");
+
+    // Alt, Shift and W held, and two buttons: Shift is 1 and Alt 4, so 5 is both.
+    Window d = Window.headless(width: 64, height: 64);
+    down(w: d, key: Key::AltLeft, mods: 4);
+    down(w: d, key: Key::ShiftLeft, mods: 5);
+    down(w: d, key: Key::KeyW, mods: 5);
+    button(w: d, which: MouseButton::Right, pressed: true, mods: 5);
+    button(w: d, which: MouseButton::Left, pressed: true, mods: 5);
+    focus(w: d, focused: false);
+    expectDrained(t: t, w: d, name: "buttons go up first, then keys by HID id, each carrying the modifiers held after it",
+                  want: "KeyDown 226 4 false; KeyDown 225 5 false; KeyDown 26 5 false; MouseButton 1 true 5; MouseButton 0 true 5; MouseButton 0 false 5; MouseButton 1 false 5; KeyUp 26 5; KeyUp 225 4; KeyUp 226 0; Focus false");
+
+    // Each right-hand modifier to its bit (Shift 1, Control 2, Alt 4, Super 8), and Shift's bit kept while either is held.
+    Window e = Window.headless(width: 64, height: 64);
+    down(w: e, key: Key::ShiftLeft, mods: 0);
+    down(w: e, key: Key::ShiftRight, mods: 0);
+    down(w: e, key: Key::ControlRight, mods: 0);
+    down(w: e, key: Key::AltRight, mods: 0);
+    down(w: e, key: Key::MetaRight, mods: 0);
+    focus(w: e, focused: false);
+    expectDrained(t: t, w: e, name: "a modifier's bit stays while its other side is held, and each right side has its bit",
+                  want: "KeyDown 225 0 false; KeyDown 229 0 false; KeyDown 228 0 false; KeyDown 230 0 false; KeyDown 231 0 false; KeyUp 225 15; KeyUp 228 13; KeyUp 229 12; KeyUp 230 8; KeyUp 231 0; Focus false");
+
+    Window f = Window.headless(width: 64, height: 64);
+    down(w: f, key: Key::KeyS, mods: 0);
+    down(w: f, key: Key::ControlLeft, mods: 0);
+    down(w: f, key: Key::MetaLeft, mods: 0);
+    focus(w: f, focused: false);
+    expectDrained(t: t, w: f, name: "the left Control and Meta have their bits",
+                  want: "KeyDown 22 0 false; KeyDown 224 0 false; KeyDown 227 0 false; KeyUp 22 10; KeyUp 224 8; KeyUp 227 0; Focus false");
+
+    // CapsLock is 16 and NumLock 32: toggles, carried as the last key or button event reported them.
+    Window g = Window.headless(width: 64, height: 64);
+    down(w: g, key: Key::KeyW, mods: 48);
+    down(w: g, key: Key::KeyS, mods: 16);
+    focus(w: g, focused: false);
+    expectDrained(t: t, w: g, name: "the ups carry the lock bits the last key or button event reported",
+                  want: "KeyDown 26 48 false; KeyDown 22 16 false; KeyUp 22 16; KeyUp 26 16; Focus false");
+
+    Window h = Window.headless(width: 64, height: 64);
+    down(w: h, key: Key::KeyW, mods: 0);
+    up(w: h, key: Key::KeyS, mods: 32);
+    focus(w: h, focused: false);
+    expectDrained(t: t, w: h, name: "an up the window drops still reports the lock bits",
+                  want: "KeyDown 26 0 false; KeyUp 26 32; Focus false");
+
+    Window k = Window.headless(width: 64, height: 64);
+    k.setCursor(mode: CursorMode::Locked);
+    down(w: k, key: Key::KeyW, mods: 0);
+    focus(w: k, focused: false);
+    expectDrained(t: t, w: k, name: "a focus loss while locked: the ups, then the lock given back, then Focus",
+                  want: "PointerLock true; KeyDown 26 0 false; KeyUp 26 0; PointerLock false; Focus false");
+
+    Window m = Window.headless(width: 64, height: 64);
+    m.setCursor(mode: CursorMode::Locked);
+    focus(w: m, focused: true);
+    expectDrained(t: t, w: m, name: "a focus gain keeps the lock", want: "PointerLock true; Focus true");
+
+    Window n = Window.headless(width: 64, height: 64);
+    focus(w: n, focused: false);
+    expectDrained(t: t, w: n, name: "a focus change with nothing held is the Focus alone", want: "Focus false");
+}
+
+// Decision 4: the ring keeps room for an up of everything held, so an up is never counted into a drop; while the ring
+// overflows, the drop record stays last and the ups go before it.
+unsafe fn void reserve(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    down(w: a, key: Key::KeyW, mods: 0);
+    fill(w: a, count: 300);
+    focus(w: a, focused: false);
+    expectDrained(t: t, w: a, name: "a full ring keeps room for a held key's up at a focus change, the drop after it",
+                  want: "KeyDown 26 0 false; Text 120 ×253; KeyUp 26 0; Dropped 48");
+
+    Window b = Window.headless(width: 64, height: 64);
+    down(w: b, key: Key::KeyW, mods: 0);
+    fill(w: b, count: 300);
+    up(w: b, key: Key::KeyW, mods: 0);
+    expectDrained(t: t, w: b, name: "a held key's own up into a full ring is kept",
+                  want: "KeyDown 26 0 false; Text 120 ×253; KeyUp 26 0; Dropped 47");
+
+    // Two keys and a button held: three slots kept for their ups.
+    Window c = Window.headless(width: 64, height: 64);
+    down(w: c, key: Key::KeyW, mods: 0);
+    down(w: c, key: Key::KeyS, mods: 0);
+    button(w: c, which: MouseButton::Left, pressed: true, mods: 0);
+    fill(w: c, count: 300);
+    focus(w: c, focused: false);
+    expectDrained(t: t, w: c, name: "the room kept grows with each held key and button",
+                  want: "KeyDown 26 0 false; KeyDown 22 0 false; MouseButton 0 true 0; Text 120 ×249; MouseButton 0 false 0; KeyUp 22 0; KeyUp 26 0; Dropped 52");
+
+    Window d = Window.headless(width: 64, height: 64);
+    fill(w: d, count: 255);
+    down(w: d, key: Key::KeyW, mods: 0);
+    up(w: d, key: Key::KeyW, mods: 0);
+    expectDrained(t: t, w: d, name: "a down that finds no room is counted into the drop and not held, so its up is dropped",
+                  want: "Text 120 ×255; Dropped 1");
+    d.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true));
+    expectDrained(t: t, w: d, name: "and the key's next repeat is a press", want: "KeyDown 26 0 false");
+
+    Window e = Window.headless(width: 64, height: 64);
+    fill(w: e, count: 255);
+    button(w: e, which: MouseButton::Left, pressed: true, mods: 0);
+    button(w: e, which: MouseButton::Left, pressed: false, mods: 0);
+    expectDrained(t: t, w: e, name: "a button down that finds no room is counted into the drop and not held, so its up is dropped",
+                  want: "Text 120 ×255; Dropped 1");
+
+    // One slot left beyond the drop's: a down needs two, its own and its up's.
+    Window f = Window.headless(width: 64, height: 64);
+    fill(w: f, count: 254);
+    down(w: f, key: Key::KeyW, mods: 0);
+    focus(w: f, focused: false);
+    expectDrained(t: t, w: f, name: "a down with room for itself but not its up is counted into the drop",
+                  want: "Text 120 ×254; Dropped 2");
+}
+
+// Decision 5: a replayed stream already holds the window's ups before its Focus, so replaying it releases nothing twice.
+unsafe fn void replay(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    down(w: a, key: Key::KeyW, mods: 0);
+    up(w: a, key: Key::KeyW, mods: 0);
+    focus(w: a, focused: false);
+    expectDrained(t: t, w: a, name: "a replayed stream's ups release its keys, and its Focus finds nothing held",
+                  want: "KeyDown 26 0 false; KeyUp 26 0; Focus false");
+}
+
+// Decision 7: a program's own release, for its own reasons, as a focus change makes it, with no Focus.
+unsafe fn void releasing(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    down(w: a, key: Key::ShiftLeft, mods: 1);
+    down(w: a, key: Key::KeyW, mods: 1);
+    button(w: a, which: MouseButton::Left, pressed: true, mods: 1);
+    a.releaseHeld();
+    expectDrained(t: t, w: a, name: "releaseHeld releases what is held as a focus change does, with no Focus",
+                  want: "KeyDown 225 1 false; KeyDown 26 1 false; MouseButton 0 true 1; MouseButton 0 false 1; KeyUp 26 1; KeyUp 225 0");
+    focus(w: a, focused: false);
+    expectDrained(t: t, w: a, name: "after releaseHeld nothing is held: the next focus change is the Focus alone",
+                  want: "Focus false");
+
+    Window b = Window.headless(width: 64, height: 64);
+    b.releaseHeld();
+    expectDrained(t: t, w: b, name: "releaseHeld with nothing held posts nothing", want: "");
+}
+
+unsafe fn void heldCases(ref Tally t) {
+    pairing(t: t);
+    unknownKeys(t: t);
+    release(t: t);
+    reserve(t: t);
+    replay(t: t);
+    releasing(t: t);
+}
+
+// Decision 6, on the web: no system window yet (WIN-3).
+@compileFor(ARCH_WASM32)
+unsafe fn void heldSystem(ref Tally t) { }
+
+// Decision 6: GLFW's own focus path, on a hidden system window. GLFW releases a held key after the focus callback; the
+// window has already released it, so GLFW's up is dropped. Keys only: a button down sets GLFW's mouse capture on the
+// window (measured, AGENTS.window.md item 5), so buttons are held by the headless cases.
+@compileFor(!ARCH_WASM32)
+unsafe fn void heldSystem(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip the held keys on a system window (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    if (windowtests_win32() != 1) { println(s: "skip the held keys on a system window: only Win32 answers them"); return; }
+    windowtests_shown_next(shown: 0);
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window held", width: 120, height: 80,
+                                                         options: quietly());
+    Window w = match (give opened) {
+        case Ok(value: v): give v;
+        case Err(error: e): {
+            windowtests_shown_next(shown: 1);
+            string why = e.message();
+            t.verdict(name: "a system window releases a held key once at a focus loss", why: why);
+            return;
+        }
+    };
+    w.pump();
+    NativeWindow n = w.nativeHandle();
+    UnsafePtr hwnd = n.window();
+    int32 keyW = 87;   // VK 'W'
+
+    windowtests_send_key(hwnd: hwnd, vk: keyW, up: 0);
+    windowtests_send_focus(hwnd: hwnd, focused: 0);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a system window releases a held key once at a focus loss, GLFW's own up dropped",
+                  want: "KeyDown 26 0 false; KeyUp 26 0; Focus false");
+
+    windowtests_send_key(hwnd: hwnd, vk: keyW, up: 0);
+    windowtests_send_focus(hwnd: hwnd, focused: 1);
+    windowtests_send_key(hwnd: hwnd, vk: keyW, up: 1);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a system window releases a held key at a focus gain, and the system's later up is dropped",
+                  want: "KeyDown 26 0 false; KeyUp 26 0; Focus true");
+
+    string why = "";
+    if (windowtests_is_visible(hwnd: hwnd) != 0) { why = "it is shown"; }
+    else if (windowtests_is_foreground(hwnd: hwnd) != 0) { why = "it took the foreground"; }
+    t.verdict(name: "the window those messages went to stayed hidden, without the foreground", why: why);
+    windowtests_shown_next(shown: 1);
+}

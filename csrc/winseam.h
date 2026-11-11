@@ -7,6 +7,11 @@
 // record of its kind. When it is full a new record is dropped and counted, and the reader gets one `Dropped(n)` record
 // after the ones it holds, so a drop is never silent.
 //
+// The window keeps what is held, keys and mouse buttons (AGENTS.window.md item 5, WIN-2): an up for what is not held is
+// dropped, a key's down is a press or a repeat as the window holds it, and on a focus change, either way, every held
+// button and key goes up before the Focus record. The ring keeps a slot for each held one's up, so no up is ever
+// counted into a drop. GLFW's callbacks and `winseam_post` go through the same rules.
+//
 // Keys arrive as USB HID usage ids (the keyboard page), the DOM's `KeyboardEvent.code` numbering: GLFW's US-named,
 // layout-independent tokens translate through one table, anything unmapped to 0, Unknown.
 //
@@ -70,8 +75,10 @@ int32_t winseam_live_records(void);
 void winseam_pump(winseam_window *window);
 // The next record into `*into`: 1, or 0 when the ring is empty.
 int32_t winseam_next(winseam_window *window, winseam_event *into);
-// A record into the ring as if the system had sent it (a test, a replay, a server).
+// A record into the ring as if the system had sent it (a test, a replay, a server): the held set's rules apply to it.
 void winseam_post(winseam_window *window, const winseam_event *event);
+// An up for every held button, then every held key by HID id, as a focus change makes them, with no Focus record.
+void winseam_release_held(winseam_window *window);
 
 void winseam_size(winseam_window *window, int32_t *width, int32_t *height);
 void winseam_framebuffer_size(winseam_window *window, int32_t *width, int32_t *height);

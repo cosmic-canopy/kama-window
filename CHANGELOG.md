@@ -5,6 +5,16 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Breaking: the window keeps what is held, and releases it on a focus change** (WIN-2, 2026-11-10, kama 0.9.911;
+  AGENTS.window.md item 5).
+  - An up for a key or button not held is dropped, as is a second down for a held button.
+  - A key's `repeat` is the window's: a down for a key not held is a press, and one for a held key a repeat.
+    `Key::Unknown` is never held.
+  - A focus change, either way, releases every held button, then every held key by HID id, before `Focus`. Each up
+    carries the modifiers still held after it. GLFW's own releases are dropped.
+  - The ring keeps a slot for each held key's or button's up, so no up is counted into a drop.
+  - `post` follows the same rules, and `Window.releaseHeld()` releases on a program's request.
+  - `tests/` gains 36 cases.
 - **A window can open without taking the focus** (WIN-16, 2026-11-10, kama 0.9.911; AGENTS.window.md item 6):
   `Window.openWith(title:, width:, height:, options:)` takes a `WindowOptions` (`WindowOptions.make()`, its fields
   public), whose `focused` is true by default. `Window.open` is unchanged and takes the defaults. `tests/` opens every

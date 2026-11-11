@@ -5,7 +5,7 @@ export {
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_MOUSE_MOVE, KIND_MOUSE_BUTTON, KIND_SCROLL, KIND_RESIZE,
     KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK, KIND_CLOSE_REQUESTED, KIND_DROPPED,
     openWindow, headlessWindow, closeWindow, holdWindow, releaseWindow, windowClosed, pumpWindow, nextEvent, postEvent,
-    windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
+    releaseHeldInput, windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
 };
 
 extern "winseam.h";
@@ -46,6 +46,7 @@ extern fn int32 winseam_closed(UnsafePtr window);
 extern fn void winseam_pump(UnsafePtr window);
 extern fn int32 winseam_next(UnsafePtr window, UnsafePtr into);
 extern fn void winseam_post(UnsafePtr window, UnsafeConstPtr event);
+extern fn void winseam_release_held(UnsafePtr window);
 extern fn void winseam_size(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height);
 extern fn void winseam_framebuffer_size(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height);
 extern fn float32 winseam_scale(UnsafePtr window);
@@ -68,6 +69,7 @@ unsafe fn int32 windowClosed(UnsafePtr window) { return winseam_closed(window: w
 unsafe fn void pumpWindow(UnsafePtr window) { winseam_pump(window: window); }
 unsafe fn int32 nextEvent(UnsafePtr window, UnsafePtr into) { return winseam_next(window: window, into: into); }
 unsafe fn void postEvent(UnsafePtr window, UnsafeConstPtr event) { winseam_post(window: window, event: event); }
+unsafe fn void releaseHeldInput(UnsafePtr window) { winseam_release_held(window: window); }
 unsafe fn void windowSize(UnsafePtr window, UnsafePtr<int32> width, UnsafePtr<int32> height) {
     winseam_size(window: window, width: width, height: height);
 }

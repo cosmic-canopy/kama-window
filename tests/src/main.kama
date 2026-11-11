@@ -7,10 +7,10 @@ import {
     core::env::envOr,
     window::Window, window::WindowError, window::Event, window::Key, window::MouseButton, window::Mods,
     window::Size, window::NativeKind, window::NativeWindow,
-    keyTable, nativeHandles, systemHandles, quietly, openOptions, focusCases,
+    keyTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
 };
 
-export { Tally };
+export { Tally, describe };
 
 type resource Tally {
     int32 runs = 0;
@@ -119,12 +119,14 @@ unsafe fn void plainValues(ref Tally t) {
     else { t.verdict(name: "Size.of takes its width, then its height", why: "the fields are ${s.width} and ${s.height}"); }
 }
 
-// A full ring keeps what it holds and counts what followed in one Dropped(n), in order; then it takes events again.
+// A full ring keeps what it holds and counts what followed in one Dropped(n), in order; then it takes events again. The
+// ring is filled with typed text, which no held-set rule touches (WIN-2, AGENTS.window.md item 5, decision 4): a held
+// key keeps a slot for its up, which held.kama's cases hold.
 unsafe fn void queueDrops(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
     int32 i = 0;
     while (i < 300) {
-        w.post(event: Event::KeyDown(key: Key::Space, mods: 0, repeat: true));
+        w.post(event: Event::Text(c: 'x'));
         i = i + 1;
     }
     int32 keys = 0;
@@ -132,7 +134,7 @@ unsafe fn void queueDrops(ref Tally t) {
     bool reading = true;
     while (reading) {
         string got = next(w: w);
-        if (got == "KeyDown 44 0 true") { keys = keys + 1; } else { last = copy got; reading = false; }
+        if (got == "Text 120") { keys = keys + 1; } else { last = copy got; reading = false; }
     }
     if (keys == 255 && last == "Dropped 45") {
         t.verdict(name: "a full ring keeps 255 events and reports Dropped 45 after them", why: "");
@@ -146,26 +148,27 @@ unsafe fn void queueDrops(ref Tally t) {
 }
 
 // A ring the reader has partly drained after a drop takes new events after the Dropped record, rather than counting
-// them into it: a key up that arrives then is delivered, not lost (found by kama's review, 2026-11-08). With only the
-// reserved slot free, a new event is still counted into the drop, so the ring never overwrites what is unread.
+// them into it: an event that arrives then is delivered, not lost (found by kama's review, 2026-11-08, when a key up
+// was lost that way; a held key's up now always has a slot, held.kama). With only the reserved slot free, a new event is
+// still counted into the drop, so the ring never overwrites what is unread. Filled with typed text, as above.
 unsafe fn void queueDropsPartial(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
     int32 i = 0;
     while (i < 300) {
-        w.post(event: Event::KeyDown(key: Key::Space, mods: 0, repeat: true));
+        w.post(event: Event::Text(c: 'x'));
         i = i + 1;
     }
     string first = next(w: w);   // one read: only the slot the Dropped record holds is past the reserve
     w.post(event: Event::Focus(focused: true));
     i = 1;
     while (i < 100) { string skipped = next(w: w); i = i + 1; }   // 100 read in all: room for 99 more
-    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0));
+    w.post(event: Event::Text(c: 'a'));
     int32 keys = 0;
     string after = "";
     bool reading = true;
     while (reading) {
         string got = next(w: w);
-        if (got == "KeyDown 44 0 true") { keys = keys + 1; } else { after = copy got; reading = false; }
+        if (got == "Text 120") { keys = keys + 1; } else { after = copy got; reading = false; }
     }
     if (keys == 155 && after == "Dropped 46") {
         t.verdict(name: "with only the reserved slot free, a new event is counted into the drop", why: "");
@@ -173,7 +176,7 @@ unsafe fn void queueDropsPartial(ref Tally t) {
         t.verdict(name: "with only the reserved slot free, a new event is counted into the drop",
                   why: "${keys} key downs left, then `${after}`");
     }
-    expectNext(t: t, w: w, name: "a key up after a partial drain is delivered after the drop", want: "KeyUp 4 0");
+    expectNext(t: t, w: w, name: "an event after a partial drain is delivered after the drop", want: "Text 97");
     expectNext(t: t, w: w, name: "and then the queue is empty", want: "(empty)");
 }
 
@@ -224,8 +227,10 @@ unsafe fn uint8 appMain() {
     plainValues(t: t);
     queueDrops(t: t);
     queueDropsPartial(t: t);
+    heldCases(t: t);
     keyTable(t: t);
     nativeHandles(t: t);
+    heldSystem(t: t);
     openOptions(t: t);
     if (focusCases(t: t)) {
         systemWindow(t: t);

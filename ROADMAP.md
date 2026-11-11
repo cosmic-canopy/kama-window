@@ -15,18 +15,17 @@
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: the last stopgap that changes the API
-
-| id | item | why |
-|---|---|---|
-| WIN-2 | **Held keys and buttons are released on a focus change**: the window tracks what is held, and posts each up before `Focus`, either way, on every backend | [AGENTS.window.md, item 5](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
-
-## NEXT: the web half, then gamepads
+## NOW: the web half
 
 | id | item | why |
 |---|---|---|
 | WIN-3 | **The web half**: a window on a canvas, `KeyboardEvent.code` to HID, the device pixel ratio and its changes, pointer lock, and W3C Pointer Events for mouse, touch and pen | [detail](ROADMAP_DETAIL.md#web-half) |
-| WIN-4 | **Gamepads**, on the web and natively, released on a focus change by WIN-2's rule | [detail](ROADMAP_DETAIL.md#gamepads) |
+
+## NEXT: gamepads
+
+| id | item | why |
+|---|---|---|
+| WIN-4 | **Gamepads**, on the web and natively, each held button and deflected axis released on a focus change, as keys and buttons are | [detail](ROADMAP_DETAIL.md#gamepads) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 

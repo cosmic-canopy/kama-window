@@ -31,6 +31,10 @@ struct winseam_window {
     double last_y;
     int32_t holds;    // the Window's own, and one for each NativeWindow on it: the record goes with the last
     int32_t closed;   // the Window was dropped: hidden, no more events, while a handle still holds the record
+    uint8_t held_keys[32];   // a bit per HID id the consumer has seen go down and not up; Unknown (0) is never held
+    uint8_t held_buttons;    // a bit per mouse button, the same way
+    int32_t held_count;      // keys and buttons held: the ring keeps a slot for each one's up
+    int32_t lock_bits;       // CapsLock and NumLock, as the last key or button event reported them
 #ifndef __EMSCRIPTEN__
     GLFWwindow *glfw;
 #endif
@@ -63,40 +67,152 @@ static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
 
 // ---- the ring ------------------------------------------------------------------------------------------------------
 
-// Coalesce into the newest unread record when it is the same kind of continuous change; otherwise append. One slot is
-// kept for a Dropped record, so when the ring fills, what follows is counted there, in order, rather than lost. An
-// event is counted into a trailing Dropped record only while no other slot is free: once the reader has made room, it
-// goes after the drop (counting it in regardless lost a key up that arrived then; found by kama's review, 2026-11-08).
-static void push(winseam_window *w, const winseam_event *e) {
-    if (w->count > 0) {
-        winseam_event *last = &w->ring[(w->head + w->count - 1) % RING];
-        if (last->kind == WINSEAM_DROPPED) {
-            if (w->count >= RING - 1) { last->a += 1; return; }
-            w->ring[(w->head + w->count) % RING] = *e;
-            w->count += 1;
+// Coalesce into the newest unread record when it is the same kind of continuous change; otherwise append.
+//
+// Slots are kept: one for each up the ring owes once `e` is in (`owed`, the keys and buttons then held), and one for a
+// Dropped record. So when the ring fills, what follows is counted into the drop, in order, rather than lost, and an up
+// the ring owes always has its slot. An event is counted into a trailing Dropped record only while no other slot is
+// free: once the reader has made room, it goes after the drop (counting it in regardless lost a key up that arrived
+// then; found by kama's review, 2026-11-08). An owed up (`kept`) that finds only its own kept slot left, which happens
+// only while the ring overflows, goes before the trailing Dropped record, which stays last and goes on counting.
+//
+// 1 when `e` was stored or coalesced, 0 when it was counted into a drop.
+static int store(winseam_window *w, const winseam_event *e, int32_t owed, int kept) {
+    winseam_event *last = w->count > 0 ? &w->ring[(w->head + w->count - 1) % RING] : NULL;
+    if (last != NULL && last->kind != WINSEAM_DROPPED && last->kind == e->kind) {
+        if (e->kind == WINSEAM_MOUSE_MOVE) {
+            last->x = e->x; last->y = e->y; last->dx += e->dx; last->dy += e->dy;
+            return 1;
+        }
+        if (e->kind == WINSEAM_SCROLL) { last->dx += e->dx; last->dy += e->dy; return 1; }
+        if (e->kind == WINSEAM_RESIZE || e->kind == WINSEAM_SCALE_CHANGED) { *last = *e; return 1; }
+    }
+    if ((int64_t)w->count + 1 + owed <= RING - 1) {
+        w->ring[(w->head + w->count) % RING] = *e;
+        w->count += 1;
+        return 1;
+    }
+    if (kept && last != NULL && last->kind == WINSEAM_DROPPED && w->count < RING) {
+        w->ring[(w->head + w->count) % RING] = *last;
+        *last = *e;
+        w->count += 1;
+        return 1;
+    }
+    if (last != NULL && last->kind == WINSEAM_DROPPED) { last->a += 1; return 0; }
+    winseam_event d;
+    memset(&d, 0, sizeof d);
+    d.kind = WINSEAM_DROPPED;
+    d.a = 1;
+    w->ring[(w->head + w->count) % RING] = d;
+    w->count += 1;
+    return 0;
+}
+
+// ---- what is held (AGENTS.window.md item 5, WIN-2) -------------------------------------------------------------------
+
+// A key the window can hold: a HID id it can tell apart. Key::Unknown (0) names every key the table does not, so its
+// downs and ups pass as the system sends them.
+static int holdable(int32_t hid) { return hid > 0 && hid < 256; }
+
+static int key_held(const winseam_window *w, int32_t hid) {
+    return holdable(hid) && ((w->held_keys[hid >> 3] >> (hid & 7)) & 1);
+}
+
+static void hold_key(winseam_window *w, int32_t hid, int held) {
+    if (key_held(w, hid) == held) return;
+    w->held_keys[hid >> 3] ^= (uint8_t)(1u << (hid & 7));
+    w->held_count += held ? 1 : -1;
+}
+
+static int button_held(const winseam_window *w, int32_t button) { return (w->held_buttons >> button) & 1; }
+
+static void hold_button(winseam_window *w, int32_t button, int held) {
+    if (button_held(w, button) == held) return;
+    w->held_buttons ^= (uint8_t)(1u << button);
+    w->held_count += held ? 1 : -1;
+}
+
+// The modifier bits of the keys held now, with the lock bits last reported: what an up the window makes carries.
+static int32_t held_mods(const winseam_window *w) {
+    int32_t m = w->lock_bits;
+    if (key_held(w, 0xE1) || key_held(w, 0xE5)) m |= 1;   // ShiftLeft, ShiftRight
+    if (key_held(w, 0xE0) || key_held(w, 0xE4)) m |= 2;   // ControlLeft, ControlRight
+    if (key_held(w, 0xE2) || key_held(w, 0xE6)) m |= 4;   // AltLeft, AltRight
+    if (key_held(w, 0xE3) || key_held(w, 0xE7)) m |= 8;   // MetaLeft, MetaRight: Super
+    return m;
+}
+
+// An up for every held button, then every held key by ascending HID id, so the modifiers (224 to 231) go last: the
+// action goes up before the modifier that chose it. Each carries the modifiers still held after it. The ring owes each
+// of them, so none is counted into a drop.
+static void release_held(winseam_window *w) {
+    winseam_event e;
+    for (int32_t b = 0; b < 8; b++) {
+        if (!button_held(w, b)) continue;
+        hold_button(w, b, 0);
+        memset(&e, 0, sizeof e);
+        e.kind = WINSEAM_MOUSE_BUTTON; e.a = b; e.b = held_mods(w); e.c = 0;
+        e.x = w->last_x; e.y = w->last_y;
+        store(w, &e, w->held_count, 1);
+    }
+    for (int32_t hid = 1; hid < 256; hid++) {
+        if (!key_held(w, hid)) continue;
+        hold_key(w, hid, 0);
+        memset(&e, 0, sizeof e);
+        e.kind = WINSEAM_KEY_UP; e.a = hid; e.b = held_mods(w);
+        e.x = w->last_x; e.y = w->last_y;
+        store(w, &e, w->held_count, 1);
+    }
+}
+
+void winseam_release_held(winseam_window *w) { release_held(w); }
+
+// Every event the window takes, from the system's callbacks and from `post`, comes through here: the held set's rules,
+// then the ring.
+// - An up for a key or button not held is dropped.
+// - A key's down is a press when the key is not held, and holds it; a repeat when it is, whatever the system said. A
+//   down that is counted into a drop is not held: the consumer never saw it.
+// - A second down for a held button is dropped.
+// - A focus change, either way, releases everything held, then gives back a lock a loss undoes, then says Focus.
+static void take(winseam_window *w, const winseam_event *e) {
+    if (e->kind == WINSEAM_KEY_DOWN || e->kind == WINSEAM_KEY_UP || e->kind == WINSEAM_MOUSE_BUTTON) {
+        w->lock_bits = e->b & (16 | 32);   // CapsLock, NumLock
+    }
+    if ((e->kind == WINSEAM_KEY_DOWN || e->kind == WINSEAM_KEY_UP) && holdable(e->a)) {
+        int32_t hid = e->a;
+        winseam_event k = *e;
+        if (e->kind == WINSEAM_KEY_UP) {
+            if (!key_held(w, hid)) return;
+            hold_key(w, hid, 0);
+            store(w, &k, w->held_count, 1);
             return;
         }
-        if (last->kind == e->kind) {
-            if (e->kind == WINSEAM_MOUSE_MOVE) {
-                last->x = e->x; last->y = e->y; last->dx += e->dx; last->dy += e->dy;
-                return;
-            }
-            if (e->kind == WINSEAM_SCROLL) { last->dx += e->dx; last->dy += e->dy; return; }
-            if (e->kind == WINSEAM_RESIZE || e->kind == WINSEAM_SCALE_CHANGED) { *last = *e; return; }
-        }
-    }
-    if (w->count >= RING - 1) {
-        winseam_event d;
-        memset(&d, 0, sizeof d);
-        d.kind = WINSEAM_DROPPED;
-        d.a = 1;
-        w->ring[(w->head + w->count) % RING] = d;
-        w->count += 1;
+        if (key_held(w, hid)) { k.c = 1; store(w, &k, w->held_count, 0); return; }
+        k.c = 0;
+        if (store(w, &k, w->held_count + 1, 0)) hold_key(w, hid, 1);
         return;
     }
-    w->ring[(w->head + w->count) % RING] = *e;
-    w->count += 1;
+    if (e->kind == WINSEAM_MOUSE_BUTTON && e->a >= 0 && e->a < 8) {
+        int32_t b = e->a;
+        if (e->c) {
+            if (button_held(w, b)) return;
+            if (store(w, e, w->held_count + 1, 0)) hold_button(w, b, 1);
+            return;
+        }
+        if (!button_held(w, b)) return;
+        hold_button(w, b, 0);
+        store(w, e, w->held_count, 1);
+        return;
+    }
+    if (e->kind == WINSEAM_FOCUS) {
+        release_held(w);
+        // Losing the focus while locked gives the pointer back, as a browser does on blur; clicking in locks it again.
+        if (!e->a && w->cursor_mode == 2) winseam_set_cursor(w, 0);
+    }
+    store(w, e, w->held_count, 0);
 }
+
+static void push(winseam_window *w, const winseam_event *e) { take(w, e); }
 
 static void push_simple(winseam_window *w, int32_t kind, int32_t a, int32_t b, int32_t c) {
     winseam_event e;
@@ -276,12 +392,10 @@ static void on_scale(GLFWwindow *g, float sx, float sy) {
     push(w, &e);
 }
 
-// Losing the focus while locked gives the pointer back, as a browser does on blur; clicking in locks it again.
-static void on_focus(GLFWwindow *g, int focused) {
-    winseam_window *w = of(g);
-    if (!focused && w->cursor_mode == 2) winseam_set_cursor(w, 0);
-    push_simple(w, WINSEAM_FOCUS, focused ? 1 : 0, 0, 0);
-}
+// A focus change releases what is held, and a loss gives back a lock (`take`). GLFW then releases the keys and buttons
+// it holds itself, after this callback and only on a loss (measured on 3.5.1, AGENTS.window.md item 5): the window holds
+// none of them by then, so each of those ups is dropped.
+static void on_focus(GLFWwindow *g, int focused) { push_simple(of(g), WINSEAM_FOCUS, focused ? 1 : 0, 0, 0); }
 
 static void on_close(GLFWwindow *g) {
     glfwSetWindowShouldClose(g, GLFW_FALSE);   // the program decides; the request is only an event

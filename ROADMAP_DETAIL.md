@@ -25,6 +25,10 @@ Today `Window.open` refuses on the web. This row makes a window on a canvas.
     `ScaleChanged`;
   - **pointer lock:** requested on a gesture, `PointerLock` from `pointerlockchange`, and released on blur, as natively;
   - **focus, and the close request:** from the page's focus and visibility;
+  - **held keys and buttons:** the html5 callbacks reach the ring through the same rules as GLFW's (AGENTS.window.md
+    item 5), so a blur releases what is held. What a browser sends around a focus change is measured here, not read:
+    a `keyup` for a key pressed before the page had the focus, and a held key's repeat after a focus gain as
+    `repeat: true`;
   - **`nativeHandle()`:** `NativeKind::Canvas` with the canvas's selector, which `@kama/gpu` makes a surface from.
 - **Pointer Events** (AGENTS.window.md, item 7): one stream for mouse, touch and pen, each event with a pointer id, its
   type, buttons, pressure and tilt, and down, move, up and cancel. The mouse's events become pointer events of type
@@ -42,11 +46,13 @@ Today `Window.open` refuses on the web. This row makes a window on a canvas.
 - **To ask when the row comes up:**
   - whether pads come as events, in the one queue, or as state polled each frame, which is how both APIs give them;
   - how a pad is identified across a disconnect;
-  - **whether a program reads pads while its window is unfocused** (the owner, 2026-11-10, deciding WIN-2). Unlike
+  - **whether a program reads pads while its window is unfocused** (the owner, 2026-11-10, deciding the release of
+    held keys, AGENTS.window.md item 5). Unlike
     keys, a pad reports in the background, so this is a real choice: a setting, where the release of keys and buttons
     is not. Unity's input package resets by default only the devices that cannot run in the background. Unity also
     says a Windows program must have the focus to receive a controller's input at all, which is measured here first.
-- **WIN-2's rule extends to pads:** on a focus change each held button and deflected axis is released. A pad's state is
+- **The focus rule extends to pads** (AGENTS.window.md item 5): on a focus change each held button and deflected axis is
+  released. A pad's state is
   read, not only sent, so a button still held after a focus gain comes back with the next read, not a repeat.
 - **Split screen is pads** (the owner, 2026-11-10: "Controllers are the natural split screen solve"). Several keyboards
   and mice on one machine are not pursued, since a browser cannot tell them apart.
@@ -61,11 +67,12 @@ composition is to be measured before the design, and the platform's own API used
 <a id="international-keys"></a>
 ## WIN-17: keyboards beyond the US layout
 
-The owner, 2026-11-10, deciding WIN-2: kyoten will handle locale and localization, so the package does too. Two parts:
+The owner, 2026-11-10, deciding the release of held keys (AGENTS.window.md item 5): kyoten will handle locale and
+localization, so the package does too. Two parts:
 - **The keys of other keyboards, named.** Japanese, Korean and Brazilian keyboards have keys `Key` does not name yet:
   Henkan, Muhenkan, Kana, Yen, the ABNT2 key, Lang1 and Lang2 (USB HID International1 to 5 and Lang1 to 9; the DOM's
   `Convert`, `NonConvert`, `KanaMode`, `IntlYen`, `IntlRo`, `Lang1`, `Lang2`). Today each is `Key::Unknown`. GLFW has
-  no token for them and reports each as `GLFW_KEY_UNKNOWN` with its scancode (measured, WIN-2's probe), so natively
+  no token for them and reports each as `GLFW_KEY_UNKNOWN` with its scancode (measured, AGENTS.window.md item 5), so natively
   they are mapped by scancode, on each system. Media and launch keys sit on HID's consumer page, and whether `Key`
   names them is this row's question.
 - **Each key's label in the player's layout,** for prompts and rebinding screens. `Key` names a position, so the key
@@ -137,7 +144,6 @@ built by kama on every native target, with GLFW's zlib notice beside it.
 
 kama's floor for a first publish is `tests/` green on every target the package claims, and `AGENTS.package.md` has the
 rest. Before it:
-- WIN-2, which changes the API;
 - WIN-3, so the web is a claimed target that passes;
 - WIN-14.
 

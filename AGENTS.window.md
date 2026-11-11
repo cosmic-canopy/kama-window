@@ -30,8 +30,9 @@ file the agent's brief and the departures below, the record kama reads.
 
 **[SPEC.md](SPEC.md) is what the package is, and [ROADMAP.md](ROADMAP.md) what comes next.** In short (2026-11-10, kama
 0.9.911): a system window natively on Windows and a headless one on every target, and a window's native record counted,
-so a GPU surface holds it (WIN-1, built), and a window opens without taking the focus when asked (WIN-16, built). The
-web half and gamepads are not built yet, and WIN-2, the last stopgap, is next. `tools/test.sh` passes before every commit.
+so a GPU surface holds it (WIN-1, built), a window opens without taking the focus when asked (WIN-16, built), and the
+window keeps what is held and releases it on a focus change (WIN-2, built: the last stopgap). The web half and gamepads
+are not built yet, and the web half, WIN-3, is next. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -55,9 +56,12 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    numbered by the HID usage id, as the design says.
 4. **Kept: `nativeHandle()` returns a `NativeWindow` value** (a kind, a display or module, a window), the shape a GPU
    surface needs on each system; `size()` and `framebufferSize()` return a `Size`.
-5. **Kept: losing the focus while locked unlocks the pointer,** as a browser does on blur. **Stopgap, WIN-2: held keys are
-   not released on focus loss;** `Focus(false)` is the only signal, so every consumer must release them itself.
-   **The production answer:** the window tracks what is held. On a focus change, either way, it posts a `KeyUp` for
+5. **Kept: losing the focus while locked unlocks the pointer,** as a browser does on blur. **Built on 2026-11-10: held
+   keys and buttons released on a focus change (WIN-2)** (kama 0.9.911), replacing the stopgap below; how it was built
+   is at this item's end.
+
+   **Stopgap, replaced: held keys were not released on focus loss;** `Focus(false)` was the only signal, so every
+   consumer had to release them itself. **The production answer:** the window tracks what is held. On a focus change, either way, it posts a `KeyUp` for
    each held key and a button-up for each held mouse button, then the `Focus` event, on every platform; once gamepads
    land, each held button and deflected axis is released too. Alt-tab or a blurred tab never delivers the key-up, so
    without this a consumer is left with a stuck key. Releasing on focus gain as well covers a remote desktop, which
@@ -146,6 +150,31 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    system repeats it or it is pressed again, and a mouse button, which never repeats, until it is pressed again. Asking
    the system which keys are down at a focus gain is not done: a browser cannot, and the release on gain exists for a
    remote desktop that drops key-ups, where the remote system itself still believes the key is down.
+
+   **Built (WIN-2), test-first, natively on Windows and under node:**
+   - **36 new cases** (97 natively, 69 under node): 33 headless on every leg in `tests/src/held.kama`, and 3 on a hidden
+     system window, whose GLFW window procedure is handed `WM_KEYDOWN`, `WM_KILLFOCUS` and `WM_SETFOCUS` through the
+     tests' Win32 hooks (`windowtests_send_key`, `windowtests_send_focus`). Of the first 31 written, 23 failed on the
+     old code, the native two among them in GLFW's order (`Focus false`, then its `KeyUp`); the other 8 pass on it too
+     and hold a rule a change could break. The 3 `releaseHeld` cases did not compile until it existed. 2 more were added
+     at the boundaries, each for a mutation: a down with room for itself but not its up, and a button down into a full
+     ring.
+   - **31 of 31 mutations caught,** none refused by the compiler. One, a button down counted into the drop yet held,
+     was missed at first: no case filled the ring and then pressed a button. The case was added and the mutation
+     caught.
+   - `queueDrops` and `queueDropsPartial` fill the ring with `Text`, which no held-set rule touches, and their counts
+     stand (decision 4). Their late event, the regression from kama's review, is `Text` too: a held key's up now always
+     has a slot.
+   - **One detail decided in the building, within decision 4:** while the ring overflows, an up it owes goes before the
+     trailing `Dropped` record, which stays last and goes on counting, so the ring needs only one slot for drops.
+
+   **Where it lives:**
+   - `csrc/winseam.c`: `take()`, which every event goes through, GLFW's callbacks and `winseam_post` alike: the held
+     bitmap (a bit per HID id and per button), `held_count`, the lock bits, `release_held()` and the room `store()`
+     keeps. `on_focus` is only the `Focus` record now; the unlock moved into `take()`, so a posted `Focus` gives a lock
+     back too. `winseam_release_held` is the public call;
+   - `src/window.kama`: `Window.releaseHeld()`, through `src/native/seam.kama`'s `releaseHeldInput`;
+   - `tests/src/held.kama`, and the two hooks in `tests/csrc/hooks.c`.
 6. **Built on 2026-11-10: a window counts references to its native record (WIN-1)** (kama 0.9.911), replacing the
    stopgap below. Natively on Windows (GLFW 3.5.1) and under node, test-first:
    - **18 new cases:** 12 headless on every leg, and 6 on a system window;

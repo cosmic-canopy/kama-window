@@ -7,6 +7,8 @@
 //   than dropping in silence.
 // - A `Key` is a physical key, named as the DOM's `KeyboardEvent.code` names it and numbered by its USB HID usage id,
 //   whatever the layout; typed text arrives separately, as `Text`.
+// - The window keeps what is held (WIN-2, AGENTS.window.md item 5): every up follows its down, every down is followed in
+//   time by its up, and a focus change, either way, releases every held button and key before its `Focus`.
 // - Positions and sizes are logical; `scale()` converts to pixels, and `framebufferSize()` is in pixels.
 // - It is not `Sendable`: a window lives on the thread that opened it, which GLFW requires.
 
@@ -20,7 +22,8 @@ import {
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
     window::native::holdWindow, window::native::releaseWindow, window::native::windowClosed,
-    window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::windowSize,
+    window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::releaseHeldInput,
+    window::native::windowSize,
     window::native::framebufferSize, window::native::windowScale, window::native::setCursor,
     window::native::nativeKind, window::native::nativeDisplay, window::native::nativeWindow,
 };
@@ -267,11 +270,19 @@ type resource Window {
         return Optional::Some(value: eventOf(e: e));
     }
 
-    // An event into the queue as if the system had sent it (coalesced like one). A Resize also sets the size.
+    // An event into the queue as if the system had sent it: coalesced like one, and moving what is held like one, so a
+    // posted Focus releases what is held first. A Resize also sets the size.
     public unsafe fn void post(const ref Event event) {
         if (this.seam == null) { return; }
         winseam_event e = recordOf(event: event);
         postEvent(window: this.seam, event: cast<UnsafeConstPtr>(addr(of: e)));
+    }
+
+    // An up for every held mouse button, then every held key, as a focus change makes them and with no Focus after: a
+    // program's own release, for a reason only it knows (a remote desktop that drops key ups, a long stall).
+    public unsafe fn void releaseHeld() {
+        if (this.seam == null) { return; }
+        releaseHeldInput(window: this.seam);
     }
 
     // Logical size.
