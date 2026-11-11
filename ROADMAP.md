@@ -10,15 +10,16 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-16**
+**Next id: WIN-17**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: the last stopgap that changes the API
+## NOW: a window opened without the focus, then the last stopgap that changes the API
 
 | id | item | why |
 |---|---|---|
+| WIN-16 | **A window opened without taking the focus**: `WindowOptions` (`focused`, true by default) and `Window.openWith(title:, width:, height:, options:)`, so the tests' own GLFW hints go | [detail](ROADMAP_DETAIL.md#open-options) |
 | WIN-2 | **Held keys and buttons are released on a focus change**: the window tracks what is held, and posts each up before `Focus`, either way, on every backend | [AGENTS.window.md, item 5](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
 
 ## NEXT: the web half, then gamepads

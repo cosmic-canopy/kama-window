@@ -30,8 +30,8 @@ file the agent's brief and the departures below, the record kama reads.
 
 **[SPEC.md](SPEC.md) is what the package is, and [ROADMAP.md](ROADMAP.md) what comes next.** In short (2026-11-10, kama
 0.9.911): a system window natively on Windows and a headless one on every target, and a window's native record counted,
-so a GPU surface holds it (WIN-1, built). The web half and gamepads are not built yet, and WIN-2, the last stopgap, is
-next. `tools/test.sh` passes before every commit.
+so a GPU surface holds it (WIN-1, built). The web half and gamepads are not built yet. WIN-16, a window opened
+without taking the focus, is next, then WIN-2, the last stopgap. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -154,7 +154,9 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    runs while its windows took the focus, and in none of 50 once they opened unfocused; the cause was not found. The
    hook initialises GLFW outside the package's count, which masked one mutation until it was made faithful. **The
    production answer is an open-time setting** (winit's `with_active`, GLFW's `GLFW_FOCUSED`), focused by default, so
-   the tests ask for an unfocused window through the API. It is the owner's to decide.
+   the tests ask for an unfocused window through the API. **Decided** (the owner, 2026-11-10: "yes b sounds better"):
+   an options value, `WindowOptions`, over a separate `Window.openUnfocused`. WIN-16 builds it, and the stopgap goes
+   with it.
 7. **Missing: pointers other than a mouse (WIN-3, WIN-11), and Android (WIN-13)** (kama's review).
    - **Pointer events.** A phone, a tablet and a pen need touch and pen input as well as the mouse. **The production
      answer is W3C Pointer Events,** which the web half receives anyway: one stream for mouse, touch and pen, each
