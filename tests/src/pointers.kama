@@ -1,0 +1,376 @@
+// WIN-3, decision 2 (AGENTS.window.md item 8): Pointer Events on every backend. One stream for the mouse, touch and pen,
+// each event carrying its `Pointer`; every button its own down and up; a held touch or pen contact cancelled, not
+// lifted, at a focus change; moves coalescing per pointer; `Scroll` with its unit (decision 9).
+//
+// Headless, posted as a system would send them, so they run on every leg with no display.
+
+import {
+    Tally, drained, expectDrained,
+    window::Window, window::Event, window::Key, window::Pointer, window::PointerKind, window::PointerButton,
+    window::ScrollUnit,
+};
+export { pointerCases, mouseAt };
+
+unsafe fn Pointer mouseAt(float64 x, float64 y) { return Pointer.at(id: 1, kind: PointerKind::Mouse, x: x, y: y); }
+unsafe fn Pointer touchAt(int32 id, float64 x, float64 y) { return Pointer.at(id: id, kind: PointerKind::Touch, x: x, y: y); }
+unsafe fn Pointer penAt(float64 x, float64 y) { return Pointer.at(id: 2, kind: PointerKind::Pen, x: x, y: y); }
+
+unsafe fn void press(ref Window w, const ref Pointer p, PointerButton button) {
+    w.post(event: Event::PointerDown(pointer: p, button: button, mods: 0));
+}
+unsafe fn void lift(ref Window w, const ref Pointer p, PointerButton button) {
+    w.post(event: Event::PointerUp(pointer: p, button: button, mods: 0));
+}
+unsafe fn void move(ref Window w, const ref Pointer p, float64 dx, float64 dy) {
+    w.post(event: Event::PointerMove(pointer: p, dx: dx, dy: dy));
+}
+
+// `Pointer.at` and what a pointer says it holds.
+unsafe fn void pointerValue(ref Tally t) {
+    Pointer p = Pointer.at(id: 7, kind: PointerKind::Touch, x: 3.0, y: 4.0);
+    string why = "";
+    if (p.id != 7 || p.x != 3.0 || p.y != 4.0) { why = "id ${p.id} at ${p.x} ${p.y}"; }
+    else if (!p.primary) { why = "not primary"; }
+    else if (p.buttons != 0 || p.pressure != 0.0 || p.tiltX != 0.0 || p.tiltY != 0.0 || p.twist != 0.0) {
+        why = "buttons ${p.buttons}, pressure ${p.pressure}, tilt ${p.tiltX} ${p.tiltY}, twist ${p.twist}";
+    }
+    else if (p.width != 1.0 || p.height != 1.0) { why = "a contact ${p.width} × ${p.height}"; }
+    t.verdict(name: "Pointer.at is a primary pointer of one unit, holding nothing, at rest", why: why);
+
+    Pointer q = Pointer.at(id: 1, kind: PointerKind::Mouse, x: 0.0, y: 0.0);
+    q.buttons = 5;   // Left (bit 0) and Right (bit 2)
+    bool right = q.pressed(button: PointerButton::Right);
+    bool left = q.pressed(button: PointerButton::Left);
+    bool middle = q.pressed(button: PointerButton::Middle);
+    if (left && right && !middle) { t.verdict(name: "a pointer's buttons are a bit per PointerButton", why: ""); }
+    else { t.verdict(name: "a pointer's buttons are a bit per PointerButton", why: "left ${left}, right ${right}, middle ${middle}"); }
+
+    int32 eraser = cast<int32>(PointerButton::Eraser);
+    int32 sixth = cast<int32>(PointerButton::Sixth);
+    int32 rightN = cast<int32>(PointerButton::Right);
+    int32 middleN = cast<int32>(PointerButton::Middle);
+    if (middleN == 1 && rightN == 2 && eraser == 5 && sixth == 6) {
+        t.verdict(name: "PointerButton is numbered as the W3C's button is", why: "");
+    } else {
+        t.verdict(name: "PointerButton is numbered as the W3C's button is",
+                  why: "middle ${middleN}, right ${rightN}, eraser ${eraser}, sixth ${sixth}");
+    }
+}
+
+// Decision 2.4: a move joins the newest unread record only when that record is the same pointer's move.
+unsafe fn void coalescing(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    move(w: a, p: touchAt(id: 5, x: 1.0, y: 1.0), dx: 1.0, dy: 1.0);
+    move(w: a, p: touchAt(id: 5, x: 3.0, y: 4.0), dx: 2.0, dy: 3.0);
+    expectDrained(t: t, w: a, name: "one pointer's moves coalesce: the last position, the summed motion",
+                  want: "PointerMove touch5 3 4 3 4 [0]");
+
+    Window b = Window.headless(width: 64, height: 64);
+    move(w: b, p: touchAt(id: 5, x: 1.0, y: 1.0), dx: 1.0, dy: 1.0);
+    move(w: b, p: touchAt(id: 6, x: 9.0, y: 9.0), dx: 1.0, dy: 1.0);
+    move(w: b, p: touchAt(id: 5, x: 2.0, y: 2.0), dx: 1.0, dy: 1.0);
+    expectDrained(t: t, w: b, name: "two pointers' moves do not coalesce across each other",
+                  want: "PointerMove touch5 1 1 1 1 [0]; PointerMove touch6 9 9 1 1 [0]; PointerMove touch5 2 2 1 1 [0]");
+
+    Window c = Window.headless(width: 64, height: 64);
+    move(w: c, p: mouseAt(x: 1.0, y: 1.0), dx: 1.0, dy: 1.0);
+    move(w: c, p: touchAt(id: 1, x: 2.0, y: 2.0), dx: 1.0, dy: 1.0);
+    expectDrained(t: t, w: c, name: "a mouse and a touch sharing an id are two pointers",
+                  want: "PointerMove mouse1 1 1 1 1 [0]; PointerMove touch1 2 2 1 1 [0]");
+
+    // The coalesced record is the newer sample: its pressure and tilt, not the first one's.
+    Window d = Window.headless(width: 64, height: 64);
+    Pointer early = penAt(x: 1.0, y: 1.0);
+    early.pressure = 0.2;
+    Pointer late = penAt(x: 2.0, y: 2.0);
+    late.pressure = 0.7;
+    late.tiltX = 30.0;
+    move(w: d, p: early, dx: 1.0, dy: 1.0);
+    move(w: d, p: late, dx: 1.0, dy: 1.0);
+    Optional<Event> e = d.pollEvent();
+    string why = "no event";
+    match (e) {
+        case Some(value: v): {
+            match (v) {
+                case PointerMove(pointer: p, dx: dx, dy: dy): {
+                    if (p.pressure == 0.7 && p.tiltX == 30.0 && dx == 2.0 && p.primary) { why = ""; }
+                    else { why = "pressure ${p.pressure}, tiltX ${p.tiltX}, dx ${dx}, primary ${p.primary}"; }
+                }
+                case _: { why = "not a move"; }
+            };
+        }
+        case None: { }
+    };
+    t.verdict(name: "a coalesced move carries the newer sample's pressure, tilt and primary flag", why: why);
+}
+
+// What the window says a pointer holds: `buttons` after each event, and a mouse's pressure from it (the W3C's rule for
+// a device with none: 0.5 while a button is held).
+unsafe fn void holding(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    press(w: a, p: mouseAt(x: 1.0, y: 1.0), button: PointerButton::Left);
+    move(w: a, p: mouseAt(x: 2.0, y: 2.0), dx: 1.0, dy: 1.0);
+    press(w: a, p: mouseAt(x: 2.0, y: 2.0), button: PointerButton::Right);
+    lift(w: a, p: mouseAt(x: 2.0, y: 2.0), button: PointerButton::Left);
+    lift(w: a, p: mouseAt(x: 2.0, y: 2.0), button: PointerButton::Right);
+    move(w: a, p: mouseAt(x: 3.0, y: 3.0), dx: 1.0, dy: 1.0);
+    expectDrained(t: t, w: a, name: "each event carries the buttons the window holds for its pointer after it",
+                  want: "PointerDown mouse1 0 0 [1]; PointerMove mouse1 2 2 1 1 [1]; PointerDown mouse1 2 0 [5]; PointerUp mouse1 0 0 [4]; PointerUp mouse1 2 0 [0]; PointerMove mouse1 3 3 1 1 [0]");
+
+    Window b = Window.headless(width: 64, height: 64);
+    Pointer claims = mouseAt(x: 1.0, y: 1.0);
+    claims.buttons = 255;
+    claims.pressure = 0.9;
+    move(w: b, p: claims, dx: 0.0, dy: 0.0);
+    press(w: b, p: claims, button: PointerButton::Left);
+    float32 before = -1.0;
+    float32 during = -1.0;
+    uint16 heldBefore = 99;
+    Optional<Event> first = b.pollEvent();
+    match (first) {
+        case Some(value: v): { match (v) { case PointerMove(pointer: p, dx: dx, dy: dy): { before = p.pressure; heldBefore = p.buttons; } case _: { } }; }
+        case None: { }
+    };
+    Optional<Event> second = b.pollEvent();
+    match (second) {
+        case Some(value: v): { match (v) { case PointerDown(pointer: p, button: bt, mods: m): { during = p.pressure; } case _: { } }; }
+        case None: { }
+    };
+    if (heldBefore == 0 && before == 0.0 && during == 0.5) {
+        t.verdict(name: "a mouse's buttons and pressure are the window's: 0.5 while a button is held, else 0", why: "");
+    } else {
+        t.verdict(name: "a mouse's buttons and pressure are the window's: 0.5 while a button is held, else 0",
+                  why: "buttons ${heldBefore} and pressure ${before} at rest, pressure ${during} pressed");
+    }
+
+    // A pen's own pressure, tilt, twist and size pass through.
+    Window c = Window.headless(width: 64, height: 64);
+    Pointer pen = penAt(x: 5.0, y: 6.0);
+    pen.pressure = 0.6;
+    pen.tiltX = 30.0;
+    pen.tiltY = -20.0;
+    pen.twist = 45.0;
+    pen.width = 2.0;
+    pen.height = 3.0;
+    pen.primary = false;
+    press(w: c, p: pen, button: PointerButton::Left);
+    string why = "no event";
+    Optional<Event> e = c.pollEvent();
+    match (e) {
+        case Some(value: v): {
+            match (v) {
+                case PointerDown(pointer: p, button: bt, mods: m): {
+                    bool kept = p.pressure == 0.6 && p.tiltX == 30.0 && p.tiltY == -20.0 && p.twist == 45.0 &&
+                                p.width == 2.0 && p.height == 3.0 && !p.primary && p.x == 5.0 && p.y == 6.0;
+                    if (kept) { why = ""; }
+                    else { why = "pressure ${p.pressure}, tilt ${p.tiltX} ${p.tiltY}, twist ${p.twist}, ${p.width} × ${p.height}"; }
+                }
+                case _: { why = "not a down"; }
+            };
+        }
+        case None: { }
+    };
+    t.verdict(name: "a pen's pressure, tilt, twist, size and primary flag pass through", why: why);
+
+    // A pen's eraser, and the buttons past the eighth bit of a byte.
+    Window d = Window.headless(width: 64, height: 64);
+    press(w: d, p: penAt(x: 0.0, y: 0.0), button: PointerButton::Eraser);
+    press(w: d, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Eighth);
+    lift(w: d, p: penAt(x: 0.0, y: 0.0), button: PointerButton::Eraser);
+    lift(w: d, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Eighth);
+    expectDrained(t: t, w: d, name: "a pen's eraser and a mouse's eighth button are held like the others",
+                  want: "PointerDown pen2 5 0 [32]; PointerDown mouse1 8 0 [256]; PointerUp pen2 5 0 [0]; PointerUp mouse1 8 0 [0]");
+
+    Window f = Window.headless(width: 64, height: 64);
+    w_enterLeave(w: f);
+    expectDrained(t: t, w: f, name: "enter and leave pass through, with what the pointer holds",
+                  want: "PointerEnter mouse1 [0]; PointerDown mouse1 0 0 [1]; PointerLeave mouse1 [1]");
+}
+
+unsafe fn void w_enterLeave(ref Window w) {
+    w.post(event: Event::PointerEnter(pointer: mouseAt(x: 0.0, y: 0.0)));
+    press(w: w, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Left);
+    w.post(event: Event::PointerLeave(pointer: mouseAt(x: 70.0, y: 0.0)));
+}
+
+// Decision 2 with WIN-2's pairing, per pointer and per button.
+unsafe fn void pairing(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    lift(w: a, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    expectDrained(t: t, w: a, name: "an up for a contact never down is dropped", want: "");
+
+    Window b = Window.headless(width: 64, height: 64);
+    press(w: b, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: b, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    lift(w: b, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    lift(w: b, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    expectDrained(t: t, w: b, name: "a second down for a held contact is dropped, and its up delivered once",
+                  want: "PointerDown touch4 0 0 [1]; PointerUp touch4 0 0 [0]");
+
+    Window c = Window.headless(width: 64, height: 64);
+    press(w: c, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: c, p: touchAt(id: 5, x: 9.0, y: 0.0), button: PointerButton::Left);
+    lift(w: c, p: touchAt(id: 4, x: 1.0, y: 0.0), button: PointerButton::Left);
+    lift(w: c, p: touchAt(id: 5, x: 9.0, y: 1.0), button: PointerButton::Left);
+    expectDrained(t: t, w: c, name: "each contact is held apart from the others",
+                  want: "PointerDown touch4 0 0 [1]; PointerDown touch5 0 0 [1]; PointerUp touch4 0 0 [0]; PointerUp touch5 0 0 [0]");
+
+    // The system's own cancel: the contact goes, and its later up is dropped.
+    Window d = Window.headless(width: 64, height: 64);
+    press(w: d, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    d.post(event: Event::PointerCancel(pointer: touchAt(id: 4, x: 0.0, y: 5.0)));
+    lift(w: d, p: touchAt(id: 4, x: 0.0, y: 5.0), button: PointerButton::Left);
+    expectDrained(t: t, w: d, name: "a cancel ends a held contact, and its later up is dropped",
+                  want: "PointerDown touch4 0 0 [1]; PointerCancel touch4 [0]");
+
+    Window e = Window.headless(width: 64, height: 64);
+    e.post(event: Event::PointerCancel(pointer: touchAt(id: 4, x: 0.0, y: 0.0)));
+    e.post(event: Event::PointerCancel(pointer: mouseAt(x: 0.0, y: 0.0)));
+    expectDrained(t: t, w: e, name: "a cancel for a pointer holding nothing is dropped", want: "");
+
+    // A mouse's cancel (a browser starting a drag) ends every button it holds.
+    Window f = Window.headless(width: 64, height: 64);
+    press(w: f, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: f, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Right);
+    f.post(event: Event::PointerCancel(pointer: mouseAt(x: 0.0, y: 0.0)));
+    lift(w: f, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Right);
+    f.post(event: Event::Focus(focused: false));
+    expectDrained(t: t, w: f, name: "a mouse's cancel ends every button it holds, so no up follows",
+                  want: "PointerDown mouse1 0 0 [1]; PointerDown mouse1 2 0 [5]; PointerCancel mouse1 [0]; Focus false");
+}
+
+// Decision 2.3: a focus change lifts held mouse buttons (WIN-2) and cancels held touch and pen contacts, in the order
+// the pointers went down, before the keys.
+unsafe fn void focusChange(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    press(w: a, p: touchAt(id: 4, x: 3.0, y: 4.0), button: PointerButton::Left);
+    a.post(event: Event::Focus(focused: false));
+    expectDrained(t: t, w: a, name: "a focus loss cancels a held touch contact, at its last position, then says Focus",
+                  want: "PointerDown touch4 0 0 [1]; PointerCancel touch4 [0]; Focus false");
+
+    Window b = Window.headless(width: 64, height: 64);
+    press(w: b, p: penAt(x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: b, p: penAt(x: 0.0, y: 0.0), button: PointerButton::Right);
+    b.post(event: Event::Focus(focused: true));
+    expectDrained(t: t, w: b, name: "a pen holding its tip and barrel is cancelled once, on a gain too",
+                  want: "PointerDown pen2 0 0 [1]; PointerDown pen2 2 0 [5]; PointerCancel pen2 [0]; Focus true");
+
+    Window c = Window.headless(width: 64, height: 64);
+    press(w: c, p: touchAt(id: 9, x: 0.0, y: 0.0), button: PointerButton::Left);
+    b_keyAndMouse(w: c);
+    c.post(event: Event::Focus(focused: false));
+    expectDrained(t: t, w: c, name: "pointers end in the order they went down, the mouse's buttons up, then the keys",
+                  want: "PointerDown touch9 0 0 [1]; KeyDown 26 0 false; PointerDown mouse1 2 0 [4]; PointerDown mouse1 0 0 [5]; PointerCancel touch9 [0]; PointerUp mouse1 0 0 [4]; PointerUp mouse1 2 0 [0]; KeyUp 26 0; Focus false");
+
+    // The cancel carries where the contact last was, pressing nothing.
+    Window d = Window.headless(width: 64, height: 64);
+    Pointer pressing = touchAt(id: 4, x: 3.0, y: 4.0);
+    pressing.pressure = 0.5;
+    press(w: d, p: pressing, button: PointerButton::Left);
+    pressing.x = 8.0;
+    pressing.y = 9.0;
+    move(w: d, p: pressing, dx: 5.0, dy: 5.0);
+    d.post(event: Event::Focus(focused: false));
+    string skip1 = drainedOne(w: d);
+    string skip2 = drainedOne(w: d);
+    string why = "no cancel";
+    Optional<Event> e = d.pollEvent();
+    match (e) {
+        case Some(value: v): {
+            match (v) {
+                case PointerCancel(pointer: p): {
+                    if (p.x == 8.0 && p.y == 9.0 && p.pressure == 0.0) { why = ""; }
+                    else { why = "at ${p.x} ${p.y}, pressure ${p.pressure}"; }
+                }
+                case _: { why = "not a cancel"; }
+            };
+        }
+        case None: { }
+    };
+    t.verdict(name: "a cancel the window makes is at the contact's last position, pressing nothing", why: why);
+
+    // A pointer lifted keeps the others in the order they went down.
+    Window f = Window.headless(width: 64, height: 64);
+    press(w: f, p: touchAt(id: 1, x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: f, p: touchAt(id: 2, x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: f, p: touchAt(id: 3, x: 0.0, y: 0.0), button: PointerButton::Left);
+    lift(w: f, p: touchAt(id: 1, x: 0.0, y: 0.0), button: PointerButton::Left);
+    f.post(event: Event::Focus(focused: false));
+    expectDrained(t: t, w: f, name: "after one contact lifts, the others are cancelled in the order they went down",
+                  want: "PointerDown touch1 0 0 [1]; PointerDown touch2 0 0 [1]; PointerDown touch3 0 0 [1]; PointerUp touch1 0 0 [0]; PointerCancel touch2 [0]; PointerCancel touch3 [0]; Focus false");
+
+    // A pointer's down reports the lock bits, as a key's does (CapsLock is 16).
+    Window g = Window.headless(width: 64, height: 64);
+    g.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: false));
+    g.post(event: Event::PointerDown(pointer: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Left, mods: 16));
+    g.post(event: Event::Focus(focused: false));
+    expectDrained(t: t, w: g, name: "the ups the window makes carry the lock bits a pointer's down reported",
+                  want: "KeyDown 26 0 false; PointerDown mouse1 0 16 [1]; PointerUp mouse1 0 16 [0]; KeyUp 26 16; Focus false");
+}
+
+unsafe fn string drainedOne(ref Window w) {
+    Optional<Event> e = w.pollEvent();
+    return match (e) { case Some(value: v): "one"; case None: ""; };
+}
+
+unsafe fn void b_keyAndMouse(ref Window w) {
+    w.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: false));
+    press(w: w, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Right);
+    press(w: w, p: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Left);
+}
+
+// Decision 2.3: room for 16 pointers held at once; the ring keeps a slot for each held contact's end.
+unsafe fn void reserve(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    int32 id = 100;
+    while (id < 116) { press(w: a, p: touchAt(id: id, x: 0.0, y: 0.0), button: PointerButton::Left); id = id + 1; }
+    press(w: a, p: touchAt(id: 116, x: 0.0, y: 0.0), button: PointerButton::Left);
+    lift(w: a, p: touchAt(id: 116, x: 0.0, y: 0.0), button: PointerButton::Left);
+    lift(w: a, p: touchAt(id: 100, x: 0.0, y: 0.0), button: PointerButton::Left);
+    press(w: a, p: touchAt(id: 117, x: 0.0, y: 0.0), button: PointerButton::Left);
+    string all = drained(w: a);
+    string want = "PointerDown touch100 0 0 [1]; PointerDown touch101 0 0 [1]; PointerDown touch102 0 0 [1]; PointerDown touch103 0 0 [1]; PointerDown touch104 0 0 [1]; PointerDown touch105 0 0 [1]; PointerDown touch106 0 0 [1]; PointerDown touch107 0 0 [1]; PointerDown touch108 0 0 [1]; PointerDown touch109 0 0 [1]; PointerDown touch110 0 0 [1]; PointerDown touch111 0 0 [1]; PointerDown touch112 0 0 [1]; PointerDown touch113 0 0 [1]; PointerDown touch114 0 0 [1]; PointerDown touch115 0 0 [1]; Dropped 1; PointerUp touch100 0 0 [0]; PointerDown touch117 0 0 [1]";
+    if (all == want) { t.verdict(name: "a 17th pointer held at once is counted into the drop, its up dropped; a freed place is taken again", why: ""); }
+    else { t.verdict(name: "a 17th pointer held at once is counted into the drop, its up dropped; a freed place is taken again", why: "got `${all}`"); }
+
+    Window b = Window.headless(width: 64, height: 64);
+    press(w: b, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    fill(w: b, count: 300);
+    b.post(event: Event::Focus(focused: false));
+    expectDrained(t: t, w: b, name: "a full ring keeps room for a held contact's cancel at a focus change",
+                  want: "PointerDown touch4 0 0 [1]; Text 120 ×253; PointerCancel touch4 [0]; Dropped 48");
+
+    Window c = Window.headless(width: 64, height: 64);
+    press(w: c, p: touchAt(id: 4, x: 0.0, y: 0.0), button: PointerButton::Left);
+    fill(w: c, count: 300);
+    c.post(event: Event::PointerCancel(pointer: touchAt(id: 4, x: 0.0, y: 0.0)));
+    expectDrained(t: t, w: c, name: "a held contact's own cancel into a full ring is kept",
+                  want: "PointerDown touch4 0 0 [1]; Text 120 ×253; PointerCancel touch4 [0]; Dropped 47");
+}
+
+unsafe fn void fill(ref Window w, int32 count) {
+    int32 i = 0;
+    while (i < count) { w.post(event: Event::Text(c: 'x')); i = i + 1; }
+}
+
+// Decision 9: a scroll says its unit, and only scrolls of one unit sum.
+unsafe fn void scrolling(ref Tally t) {
+    Window a = Window.headless(width: 64, height: 64);
+    a.post(event: Event::Scroll(dx: 0.0, dy: 1.0, unit: ScrollUnit::Lines));
+    a.post(event: Event::Scroll(dx: 0.0, dy: 2.0, unit: ScrollUnit::Lines));
+    a.post(event: Event::Scroll(dx: 0.0, dy: 40.0, unit: ScrollUnit::Pixels));
+    a.post(event: Event::Scroll(dx: 5.0, dy: 60.0, unit: ScrollUnit::Pixels));
+    a.post(event: Event::Scroll(dx: 0.0, dy: 1.0, unit: ScrollUnit::Lines));
+    expectDrained(t: t, w: a, name: "scrolls of one unit sum, and a change of unit starts another",
+                  want: "Scroll 0 3 lines; Scroll 5 100 pixels; Scroll 0 1 lines");
+}
+
+unsafe fn void pointerCases(ref Tally t) {
+    pointerValue(t: t);
+    coalescing(t: t);
+    holding(t: t);
+    pairing(t: t);
+    focusChange(t: t);
+    reserve(t: t);
+    scrolling(t: t);
+}

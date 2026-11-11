@@ -2,8 +2,9 @@
 
 export {
     winseam_event,
-    KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_MOUSE_MOVE, KIND_MOUSE_BUTTON, KIND_SCROLL, KIND_RESIZE,
-    KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK, KIND_CLOSE_REQUESTED, KIND_DROPPED,
+    KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_POINTER_MOVE, KIND_POINTER_DOWN, KIND_POINTER_UP, KIND_POINTER_CANCEL,
+    KIND_POINTER_ENTER, KIND_POINTER_LEAVE, KIND_SCROLL, KIND_RESIZE, KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK,
+    KIND_CLOSE_REQUESTED, KIND_DROPPED,
     openWindow, headlessWindow, closeWindow, holdWindow, releaseWindow, windowClosed, pumpWindow, nextEvent, postEvent,
     releaseHeldInput, windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
 };
@@ -13,15 +14,19 @@ extern "winseam.h";
 comptime int32 KIND_KEY_DOWN = 1;
 comptime int32 KIND_KEY_UP = 2;
 comptime int32 KIND_TEXT = 3;
-comptime int32 KIND_MOUSE_MOVE = 4;
-comptime int32 KIND_MOUSE_BUTTON = 5;
-comptime int32 KIND_SCROLL = 6;
-comptime int32 KIND_RESIZE = 7;
-comptime int32 KIND_SCALE_CHANGED = 8;
-comptime int32 KIND_FOCUS = 9;
-comptime int32 KIND_POINTER_LOCK = 10;
-comptime int32 KIND_CLOSE_REQUESTED = 11;
-comptime int32 KIND_DROPPED = 12;
+comptime int32 KIND_POINTER_MOVE = 4;
+comptime int32 KIND_POINTER_DOWN = 5;
+comptime int32 KIND_POINTER_UP = 6;
+comptime int32 KIND_POINTER_CANCEL = 7;
+comptime int32 KIND_POINTER_ENTER = 8;
+comptime int32 KIND_POINTER_LEAVE = 9;
+comptime int32 KIND_SCROLL = 10;
+comptime int32 KIND_RESIZE = 11;
+comptime int32 KIND_SCALE_CHANGED = 12;
+comptime int32 KIND_FOCUS = 13;
+comptime int32 KIND_POINTER_LOCK = 14;
+comptime int32 KIND_CLOSE_REQUESTED = 15;
+comptime int32 KIND_DROPPED = 16;
 
 // One ring record; the header owns the layout, and kama asserts each field against it at build.
 @generate(zero)
@@ -34,6 +39,16 @@ type extern value winseam_event {
     public float64 y;
     public float64 dx;
     public float64 dy;
+    public int32 pointer;
+    public int32 pointer_kind;
+    public int32 primary;
+    public int32 buttons;
+    public float32 pressure;
+    public float32 tilt_x;
+    public float32 tilt_y;
+    public float32 twist;
+    public float32 width;
+    public float32 height;
 }
 
 extern fn UnsafePtr winseam_open(UnsafeConstPtr<cchar> title, int32 width, int32 height, int32 focused,

@@ -5,6 +5,20 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Breaking: the mouse, touch and a pen are one stream of pointer events,** as the W3C's Pointer Events are (WIN-3,
+  2026-11-11, kama 0.9.911; AGENTS.window.md item 8, decision 2).
+  - `PointerMove`, `PointerDown`, `PointerUp`, `PointerCancel`, `PointerEnter` and `PointerLeave` replace `MouseMove`
+    and `MouseButton`, each carrying a `Pointer` (`id`, `kind`, `primary`, `x`, `y`, `buttons`, `pressure`, `tiltX`,
+    `tiltY`, `twist`, `width`, `height`).
+  - `PointerButton` replaces `MouseButton`, numbered as the W3C's `button` is: `Middle` is 1 and `Right` 2, and `Eraser`
+    is 5.
+  - The held set is per pointer, for up to 16 at once; a focus change cancels a held touch or pen contact rather than
+    lifting it.
+  - A move coalesces only with its own pointer's.
+  - `Scroll(dx, dy, unit)` carries a `ScrollUnit`, `Lines` or `Pixels`; natively it is lines.
+  - Natively the mouse is pointer 1, and GLFW's cursor-enter callback gives `PointerEnter` and `PointerLeave`.
+  - `tests/` gains 36 cases.
+
 - **Breaking: the window keeps what is held, and releases it on a focus change** (WIN-2, 2026-11-10, kama 0.9.911;
   AGENTS.window.md item 5).
   - An up for a key or button not held is dropped, as is a second down for a held button.

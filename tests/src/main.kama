@@ -5,9 +5,10 @@
 import {
     core::println,
     core::env::envOr,
-    window::Window, window::WindowError, window::Event, window::Key, window::MouseButton, window::Mods,
-    window::Size, window::NativeKind, window::NativeWindow,
-    keyTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
+    window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::Pointer,
+    window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
+    keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
+    pointerCases, mouseAt,
 };
 
 export { Tally, describe };
@@ -32,15 +33,44 @@ type resource Tally {
     public const fn int32 count() { return this.runs; }
 }
 
-// What an event is, as text, for a failure's message and for comparing.
+// A pointer as text: its kind and id, as `mouse1`, `touch5` or `pen2`.
+fn string pointerName(const ref Pointer p) {
+    int32 id = p.id;
+    return match (p.kind) {
+        case Mouse: "mouse${id}";
+        case Touch: "touch${id}";
+        case Pen: "pen${id}";
+    };
+}
+
+// What an event is, as text, for a failure's message and for comparing. A pointer event ends in the buttons the window
+// says its pointer holds, in brackets.
 fn string describe(const ref Event e) {
     match (e) {
         case KeyDown(key: k, mods: m, repeat: r): { int32 kn = cast<int32>(k); return "KeyDown ${kn} ${m} ${r}"; }
         case KeyUp(key: k, mods: m): { int32 kn = cast<int32>(k); return "KeyUp ${kn} ${m}"; }
         case Text(c: c): { int32 cp = cast<int32>(c); return "Text ${cp}"; }
-        case MouseMove(x: x, y: y, dx: dx, dy: dy): { return "MouseMove ${x} ${y} ${dx} ${dy}"; }
-        case MouseButton(button: b, down: d, mods: m): { int32 bn = cast<int32>(b); return "MouseButton ${bn} ${d} ${m}"; }
-        case Scroll(dx: dx, dy: dy): { return "Scroll ${dx} ${dy}"; }
+        case PointerMove(pointer: p, dx: dx, dy: dy): {
+            string n = pointerName(p: p);
+            return "PointerMove ${n} ${p.x} ${p.y} ${dx} ${dy} [${p.buttons}]";
+        }
+        case PointerDown(pointer: p, button: b, mods: m): {
+            string n = pointerName(p: p);
+            int32 bn = cast<int32>(b);
+            return "PointerDown ${n} ${bn} ${m} [${p.buttons}]";
+        }
+        case PointerUp(pointer: p, button: b, mods: m): {
+            string n = pointerName(p: p);
+            int32 bn = cast<int32>(b);
+            return "PointerUp ${n} ${bn} ${m} [${p.buttons}]";
+        }
+        case PointerCancel(pointer: p): { string n = pointerName(p: p); return "PointerCancel ${n} [${p.buttons}]"; }
+        case PointerEnter(pointer: p): { string n = pointerName(p: p); return "PointerEnter ${n} [${p.buttons}]"; }
+        case PointerLeave(pointer: p): { string n = pointerName(p: p); return "PointerLeave ${n} [${p.buttons}]"; }
+        case Scroll(dx: dx, dy: dy, unit: u): {
+            string unit = match (u) { case Lines: "lines"; case Pixels: "pixels"; };
+            return "Scroll ${dx} ${dy} ${unit}";
+        }
         case Resize(width: w, height: h): { return "Resize ${w} ${h}"; }
         case ScaleChanged(scale: s): { return "ScaleChanged ${s}"; }
         case Focus(focused: f): { return "Focus ${f}"; }
@@ -76,12 +106,12 @@ unsafe fn void queueOrder(ref Tally t) {
     expectNext(t: t, w: w, name: "a new headless window's queue is empty", want: "(empty)");
 
     w.post(event: Event::KeyDown(key: Key::KeyA, mods: Mods::Shift, repeat: false));
-    w.post(event: Event::MouseMove(x: 10.0, y: 20.0, dx: 1.0, dy: 2.0));
-    w.post(event: Event::MouseMove(x: 12.0, y: 25.0, dx: 2.0, dy: 5.0));
-    w.post(event: Event::MouseMove(x: 15.0, y: 30.0, dx: 3.0, dy: 5.0));
-    w.post(event: Event::MouseButton(button: MouseButton::Left, down: true, mods: 0));
-    w.post(event: Event::Scroll(dx: 0.0, dy: 1.0));
-    w.post(event: Event::Scroll(dx: 0.0, dy: 2.0));
+    w.post(event: Event::PointerMove(pointer: mouseAt(x: 10.0, y: 20.0), dx: 1.0, dy: 2.0));
+    w.post(event: Event::PointerMove(pointer: mouseAt(x: 12.0, y: 25.0), dx: 2.0, dy: 5.0));
+    w.post(event: Event::PointerMove(pointer: mouseAt(x: 15.0, y: 30.0), dx: 3.0, dy: 5.0));
+    w.post(event: Event::PointerDown(pointer: mouseAt(x: 15.0, y: 30.0), button: PointerButton::Left, mods: 0));
+    w.post(event: Event::Scroll(dx: 0.0, dy: 1.0, unit: ScrollUnit::Lines));
+    w.post(event: Event::Scroll(dx: 0.0, dy: 2.0, unit: ScrollUnit::Lines));
     w.post(event: Event::Resize(width: 800, height: 600));
     w.post(event: Event::Resize(width: 1024, height: 768));
     w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0));
@@ -90,9 +120,9 @@ unsafe fn void queueOrder(ref Tally t) {
 
     expectNext(t: t, w: w, name: "a key down comes back first, with its mods", want: "KeyDown 4 1 false");
     expectNext(t: t, w: w, name: "three moves coalesce: the last position, the summed motion",
-               want: "MouseMove 15 30 6 12");
-    expectNext(t: t, w: w, name: "a click after the moves", want: "MouseButton 0 true 0");
-    expectNext(t: t, w: w, name: "two scrolls coalesce into their sum", want: "Scroll 0 3");
+               want: "PointerMove mouse1 15 30 6 12 [0]");
+    expectNext(t: t, w: w, name: "a click after the moves", want: "PointerDown mouse1 0 0 [1]");
+    expectNext(t: t, w: w, name: "two scrolls coalesce into their sum", want: "Scroll 0 3 lines");
     expectNext(t: t, w: w, name: "two resizes coalesce into the last", want: "Resize 1024 768");
     expectNext(t: t, w: w, name: "the key up keeps its place", want: "KeyUp 4 0");
     expectNext(t: t, w: w, name: "typed text is a codepoint", want: "Text 233");
@@ -228,7 +258,9 @@ unsafe fn uint8 appMain() {
     queueDrops(t: t);
     queueDropsPartial(t: t);
     heldCases(t: t);
+    pointerCases(t: t);
     keyTable(t: t);
+    buttonTable(t: t);
     nativeHandles(t: t);
     heldSystem(t: t);
     openOptions(t: t);

@@ -3,14 +3,15 @@
 // `post`. kama reads the ring one record at a time and turns each into an `Event`. (kama's design: ROADMAP_DETAIL.md
 // § 8, s8-input.)
 //
-// The ring is fixed (no heap after open) and coalesces: a mouse move, a scroll or a resize joins the newest unread
-// record of its kind. When it is full a new record is dropped and counted, and the reader gets one `Dropped(n)` record
+// The ring is fixed (no heap after open) and coalesces: a pointer's move, a scroll or a resize joins the newest unread
+// record of its kind (the same pointer's; the same unit's). When it is full a new record is dropped and counted, and the reader gets one `Dropped(n)` record
 // after the ones it holds, so a drop is never silent.
 //
-// The window keeps what is held, keys and mouse buttons (AGENTS.window.md item 5, WIN-2): an up for what is not held is
-// dropped, a key's down is a press or a repeat as the window holds it, and on a focus change, either way, every held
-// button and key goes up before the Focus record. The ring keeps a slot for each held one's up, so no up is ever
-// counted into a drop. GLFW's callbacks and `winseam_post` go through the same rules.
+// The window keeps what is held, keys and each pointer's buttons (AGENTS.window.md items 5 and 8): an up for what is not
+// held is dropped, a key's down is a press or a repeat as the window holds it, and on a focus change, either way, every
+// held mouse button goes up and every held touch or pen contact is cancelled, then every held key goes up, before the
+// Focus record. The ring keeps a slot for each held one's end, so none is ever counted into a drop. GLFW's callbacks and
+// `winseam_post` go through the same rules.
 //
 // Keys arrive as USB HID usage ids (the keyboard page), the DOM's `KeyboardEvent.code` numbering: GLFW's US-named,
 // layout-independent tokens translate through one table, anything unmapped to 0, Unknown.
@@ -26,25 +27,49 @@
 #define WINSEAM_KEY_DOWN 1         // a: HID key, b: mods, c: repeat
 #define WINSEAM_KEY_UP 2           // a: HID key, b: mods
 #define WINSEAM_TEXT 3             // a: codepoint
-#define WINSEAM_MOUSE_MOVE 4       // x, y (logical), dx, dy
-#define WINSEAM_MOUSE_BUTTON 5     // a: button, b: mods, c: down
-#define WINSEAM_SCROLL 6           // dx, dy
-#define WINSEAM_RESIZE 7           // a: width, b: height (logical)
-#define WINSEAM_SCALE_CHANGED 8    // x: the new scale
-#define WINSEAM_FOCUS 9            // a: focused
-#define WINSEAM_POINTER_LOCK 10    // a: locked
-#define WINSEAM_CLOSE_REQUESTED 11
-#define WINSEAM_DROPPED 12         // a: how many
+#define WINSEAM_POINTER_MOVE 4     // the pointer; dx, dy
+#define WINSEAM_POINTER_DOWN 5     // the pointer; a: button (W3C's numbering), b: mods
+#define WINSEAM_POINTER_UP 6       // the pointer; a: button, b: mods
+#define WINSEAM_POINTER_CANCEL 7   // the pointer
+#define WINSEAM_POINTER_ENTER 8    // the pointer
+#define WINSEAM_POINTER_LEAVE 9    // the pointer
+#define WINSEAM_SCROLL 10          // dx, dy; a: the unit, 0 lines or 1 pixels
+#define WINSEAM_RESIZE 11          // a: width, b: height (logical)
+#define WINSEAM_SCALE_CHANGED 12   // x: the new scale
+#define WINSEAM_FOCUS 13           // a: focused
+#define WINSEAM_POINTER_LOCK 14    // a: locked
+#define WINSEAM_CLOSE_REQUESTED 15
+#define WINSEAM_DROPPED 16         // a: how many
 
+// Pointer kinds, and the buttons a pointer can hold: 0 to 5 as the W3C's `button` numbers them (left, middle, right,
+// back, forward, a pen's eraser), then a mouse's sixth to eighth.
+#define WINSEAM_POINTER_MOUSE 0
+#define WINSEAM_POINTER_TOUCH 1
+#define WINSEAM_POINTER_PEN 2
+#define WINSEAM_BUTTONS 9
+
+// One event. A pointer event carries its pointer in `x`, `y` and the fields after `dy`, a W3C PointerEvent's; the
+// window sets `buttons` to what it holds for the pointer after the event, and a mouse's `pressure` from it (0.5 while
+// a button is held, the W3C's rule for a device with none).
 typedef struct winseam_event {
     int32_t kind;
     int32_t a;
     int32_t b;
     int32_t c;
-    double x;
+    double x;               // a pointer's position (logical); a new scale
     double y;
-    double dx;
+    double dx;              // a move's motion; a scroll's amount
     double dy;
+    int32_t pointer;        // the pointer's id
+    int32_t pointer_kind;   // WINSEAM_POINTER_MOUSE, _TOUCH or _PEN
+    int32_t primary;
+    int32_t buttons;        // a bit per button held: 1 << button
+    float pressure;         // 0 to 1
+    float tilt_x;           // degrees, -90 to 90
+    float tilt_y;
+    float twist;            // degrees, 0 to 359
+    float width;            // the contact's size, logical
+    float height;
 } winseam_event;
 
 typedef struct winseam_window winseam_window;
@@ -77,7 +102,8 @@ void winseam_pump(winseam_window *window);
 int32_t winseam_next(winseam_window *window, winseam_event *into);
 // A record into the ring as if the system had sent it (a test, a replay, a server): the held set's rules apply to it.
 void winseam_post(winseam_window *window, const winseam_event *event);
-// An up for every held button, then every held key by HID id, as a focus change makes them, with no Focus record.
+// The end of every held pointer (a mouse's buttons up, a contact cancelled), then an up for every held key by HID id, as
+// a focus change makes them, with no Focus record.
 void winseam_release_held(winseam_window *window);
 
 void winseam_size(winseam_window *window, int32_t *width, int32_t *height);
@@ -94,7 +120,9 @@ int32_t winseam_native_kind(winseam_window *window);
 void *winseam_native_display(winseam_window *window);
 void *winseam_native_window(winseam_window *window);
 
-// The key table, exposed so a test can check it: GLFW's key token to a HID usage id, 0 when unmapped.
+// The tables, exposed so a test can check them: GLFW's key token to a HID usage id, 0 when unmapped; GLFW's mouse button
+// to the W3C's numbering, -1 when unmapped.
 int32_t winseam_glfw_key_to_hid(int32_t glfw_key);
+int32_t winseam_glfw_button_to_pointer(int32_t glfw_button);
 
 #endif

@@ -8,11 +8,11 @@
 import {
     core::println,
     core::env::envOr,
-    Tally, describe, quietly,
-    window::Window, window::WindowError, window::Event, window::Key, window::MouseButton, window::CursorMode,
+    Tally, describe, quietly, mouseAt,
+    window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::CursorMode,
     window::NativeWindow,
 };
-export { heldCases, heldSystem };
+export { heldCases, heldSystem, drained, expectDrained };
 
 extern "hooks.h";
 extern fn int32 windowtests_win32();
@@ -66,8 +66,10 @@ unsafe fn void fill(ref Window w, int32 count) {
 
 unsafe fn void down(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyDown(key: key, mods: mods, repeat: false)); }
 unsafe fn void up(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyUp(key: key, mods: mods)); }
-unsafe fn void button(ref Window w, MouseButton which, bool pressed, uint8 mods) {
-    w.post(event: Event::MouseButton(button: which, down: pressed, mods: mods));
+// The mouse's button `which` down or up, at the origin.
+unsafe fn void button(ref Window w, PointerButton which, bool pressed, uint8 mods) {
+    if (pressed) { w.post(event: Event::PointerDown(pointer: mouseAt(x: 0.0, y: 0.0), button: which, mods: mods)); }
+    else { w.post(event: Event::PointerUp(pointer: mouseAt(x: 0.0, y: 0.0), button: which, mods: mods)); }
 }
 unsafe fn void focus(ref Window w, bool focused) { w.post(event: Event::Focus(focused: focused)); }
 
@@ -111,24 +113,24 @@ unsafe fn void pairing(ref Tally t) {
                   want: "KeyDown 26 0 false; KeyDown 22 0 false; KeyUp 26 0; KeyUp 22 0");
 
     Window g = Window.headless(width: 64, height: 64);
-    button(w: g, which: MouseButton::Left, pressed: false, mods: 0);
+    button(w: g, which: PointerButton::Left, pressed: false, mods: 0);
     expectDrained(t: t, w: g, name: "an up for a button never down is dropped", want: "");
 
     Window h = Window.headless(width: 64, height: 64);
-    button(w: h, which: MouseButton::Left, pressed: true, mods: 0);
-    button(w: h, which: MouseButton::Left, pressed: true, mods: 0);
-    button(w: h, which: MouseButton::Left, pressed: false, mods: 0);
-    button(w: h, which: MouseButton::Left, pressed: false, mods: 0);
+    button(w: h, which: PointerButton::Left, pressed: true, mods: 0);
+    button(w: h, which: PointerButton::Left, pressed: true, mods: 0);
+    button(w: h, which: PointerButton::Left, pressed: false, mods: 0);
+    button(w: h, which: PointerButton::Left, pressed: false, mods: 0);
     expectDrained(t: t, w: h, name: "a second down for a held button is dropped, and its up delivered once",
-                  want: "MouseButton 0 true 0; MouseButton 0 false 0");
+                  want: "PointerDown mouse1 0 0 [1]; PointerUp mouse1 0 0 [0]");
 
     Window k = Window.headless(width: 64, height: 64);
-    button(w: k, which: MouseButton::Left, pressed: true, mods: 0);
-    button(w: k, which: MouseButton::Right, pressed: true, mods: 0);
-    button(w: k, which: MouseButton::Left, pressed: false, mods: 0);
-    button(w: k, which: MouseButton::Right, pressed: false, mods: 0);
+    button(w: k, which: PointerButton::Left, pressed: true, mods: 0);
+    button(w: k, which: PointerButton::Right, pressed: true, mods: 0);
+    button(w: k, which: PointerButton::Left, pressed: false, mods: 0);
+    button(w: k, which: PointerButton::Right, pressed: false, mods: 0);
     expectDrained(t: t, w: k, name: "each button is held apart from the others",
-                  want: "MouseButton 0 true 0; MouseButton 1 true 0; MouseButton 0 false 0; MouseButton 1 false 0");
+                  want: "PointerDown mouse1 0 0 [1]; PointerDown mouse1 2 0 [5]; PointerUp mouse1 0 0 [4]; PointerUp mouse1 2 0 [0]");
 }
 
 // Decision 2: `Key::Unknown` names many keys, so the window never holds it.
@@ -163,21 +165,21 @@ unsafe fn void release(ref Tally t) {
                   want: "KeyDown 26 0 false; KeyUp 26 0; Focus true");
 
     Window c = Window.headless(width: 64, height: 64);
-    button(w: c, which: MouseButton::Left, pressed: true, mods: 0);
+    button(w: c, which: PointerButton::Left, pressed: true, mods: 0);
     focus(w: c, focused: false);
     expectDrained(t: t, w: c, name: "a focus loss releases a held button",
-                  want: "MouseButton 0 true 0; MouseButton 0 false 0; Focus false");
+                  want: "PointerDown mouse1 0 0 [1]; PointerUp mouse1 0 0 [0]; Focus false");
 
     // Alt, Shift and W held, and two buttons: Shift is 1 and Alt 4, so 5 is both.
     Window d = Window.headless(width: 64, height: 64);
     down(w: d, key: Key::AltLeft, mods: 4);
     down(w: d, key: Key::ShiftLeft, mods: 5);
     down(w: d, key: Key::KeyW, mods: 5);
-    button(w: d, which: MouseButton::Right, pressed: true, mods: 5);
-    button(w: d, which: MouseButton::Left, pressed: true, mods: 5);
+    button(w: d, which: PointerButton::Right, pressed: true, mods: 5);
+    button(w: d, which: PointerButton::Left, pressed: true, mods: 5);
     focus(w: d, focused: false);
     expectDrained(t: t, w: d, name: "buttons go up first, then keys by HID id, each carrying the modifiers held after it",
-                  want: "KeyDown 226 4 false; KeyDown 225 5 false; KeyDown 26 5 false; MouseButton 1 true 5; MouseButton 0 true 5; MouseButton 0 false 5; MouseButton 1 false 5; KeyUp 26 5; KeyUp 225 4; KeyUp 226 0; Focus false");
+                  want: "KeyDown 226 4 false; KeyDown 225 5 false; KeyDown 26 5 false; PointerDown mouse1 2 5 [4]; PointerDown mouse1 0 5 [5]; PointerUp mouse1 0 5 [4]; PointerUp mouse1 2 5 [0]; KeyUp 26 5; KeyUp 225 4; KeyUp 226 0; Focus false");
 
     // Each right-hand modifier to its bit (Shift 1, Control 2, Alt 4, Super 8), and Shift's bit kept while either is held.
     Window e = Window.headless(width: 64, height: 64);
@@ -251,11 +253,11 @@ unsafe fn void reserve(ref Tally t) {
     Window c = Window.headless(width: 64, height: 64);
     down(w: c, key: Key::KeyW, mods: 0);
     down(w: c, key: Key::KeyS, mods: 0);
-    button(w: c, which: MouseButton::Left, pressed: true, mods: 0);
+    button(w: c, which: PointerButton::Left, pressed: true, mods: 0);
     fill(w: c, count: 300);
     focus(w: c, focused: false);
     expectDrained(t: t, w: c, name: "the room kept grows with each held key and button",
-                  want: "KeyDown 26 0 false; KeyDown 22 0 false; MouseButton 0 true 0; Text 120 ×249; MouseButton 0 false 0; KeyUp 22 0; KeyUp 26 0; Dropped 52");
+                  want: "KeyDown 26 0 false; KeyDown 22 0 false; PointerDown mouse1 0 0 [1]; Text 120 ×249; PointerUp mouse1 0 0 [0]; KeyUp 22 0; KeyUp 26 0; Dropped 52");
 
     Window d = Window.headless(width: 64, height: 64);
     fill(w: d, count: 255);
@@ -268,8 +270,8 @@ unsafe fn void reserve(ref Tally t) {
 
     Window e = Window.headless(width: 64, height: 64);
     fill(w: e, count: 255);
-    button(w: e, which: MouseButton::Left, pressed: true, mods: 0);
-    button(w: e, which: MouseButton::Left, pressed: false, mods: 0);
+    button(w: e, which: PointerButton::Left, pressed: true, mods: 0);
+    button(w: e, which: PointerButton::Left, pressed: false, mods: 0);
     expectDrained(t: t, w: e, name: "a button down that finds no room is counted into the drop and not held, so its up is dropped",
                   want: "Text 120 ×255; Dropped 1");
 
@@ -297,10 +299,10 @@ unsafe fn void releasing(ref Tally t) {
     Window a = Window.headless(width: 64, height: 64);
     down(w: a, key: Key::ShiftLeft, mods: 1);
     down(w: a, key: Key::KeyW, mods: 1);
-    button(w: a, which: MouseButton::Left, pressed: true, mods: 1);
+    button(w: a, which: PointerButton::Left, pressed: true, mods: 1);
     a.releaseHeld();
     expectDrained(t: t, w: a, name: "releaseHeld releases what is held as a focus change does, with no Focus",
-                  want: "KeyDown 225 1 false; KeyDown 26 1 false; MouseButton 0 true 1; MouseButton 0 false 1; KeyUp 26 1; KeyUp 225 0");
+                  want: "KeyDown 225 1 false; KeyDown 26 1 false; PointerDown mouse1 0 1 [1]; PointerUp mouse1 0 1 [0]; KeyUp 26 1; KeyUp 225 0");
     focus(w: a, focused: false);
     expectDrained(t: t, w: a, name: "after releaseHeld nothing is held: the next focus change is the Focus alone",
                   want: "Focus false");

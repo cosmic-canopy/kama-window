@@ -15,6 +15,14 @@
 #endif
 
 #define RING 256
+#define POINTERS 16   // pointers holding a button at once (AGENTS.window.md item 8, decision 2.3)
+
+// A pointer holding a button: what it holds, and the event it was last seen in, which the end the window makes for it
+// at a focus change carries.
+typedef struct held_pointer {
+    winseam_event last;
+    int32_t held;   // a bit per button
+} held_pointer;
 
 struct winseam_window {
     winseam_event ring[RING];
@@ -32,8 +40,9 @@ struct winseam_window {
     int32_t holds;    // the Window's own, and one for each NativeWindow on it: the record goes with the last
     int32_t closed;   // the Window was dropped: hidden, no more events, while a handle still holds the record
     uint8_t held_keys[32];   // a bit per HID id the consumer has seen go down and not up; Unknown (0) is never held
-    uint8_t held_buttons;    // a bit per mouse button, the same way
-    int32_t held_count;      // keys and buttons held: the ring keeps a slot for each one's up
+    held_pointer pointers[POINTERS];   // each pointer holding a button, the same way, in the order they went down
+    int32_t pointer_count;
+    int32_t held_count;      // keys, and each pointer's buttons, held: the ring keeps a slot for each one's end
     int32_t lock_bits;       // CapsLock and NumLock, as the last key or button event reported them
 #ifndef __EMSCRIPTEN__
     GLFWwindow *glfw;
@@ -67,7 +76,24 @@ static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
 
 // ---- the ring ------------------------------------------------------------------------------------------------------
 
-// Coalesce into the newest unread record when it is the same kind of continuous change; otherwise append.
+static winseam_event *newest(winseam_window *w) {
+    return w->count > 0 ? &w->ring[(w->head + w->count - 1) % RING] : NULL;
+}
+
+// `n` events counted into the drop: into the trailing Dropped record, or a new one in the slot kept for it.
+static void count_drop(winseam_window *w, int32_t n) {
+    winseam_event *last = newest(w);
+    if (last != NULL && last->kind == WINSEAM_DROPPED) { last->a += n; return; }
+    winseam_event d;
+    memset(&d, 0, sizeof d);
+    d.kind = WINSEAM_DROPPED;
+    d.a = n;
+    w->ring[(w->head + w->count) % RING] = d;
+    w->count += 1;
+}
+
+// Coalesce into the newest unread record when it is the same kind of continuous change (the same pointer's move, a
+// scroll in the same unit); otherwise append.
 //
 // Slots are kept: one for each up the ring owes once `e` is in (`owed`, the keys and buttons then held), and one for a
 // Dropped record. So when the ring fills, what follows is counted into the drop, in order, rather than lost, and an up
@@ -78,13 +104,16 @@ static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
 //
 // 1 when `e` was stored or coalesced, 0 when it was counted into a drop.
 static int store(winseam_window *w, const winseam_event *e, int32_t owed, int kept) {
-    winseam_event *last = w->count > 0 ? &w->ring[(w->head + w->count - 1) % RING] : NULL;
+    winseam_event *last = newest(w);
     if (last != NULL && last->kind != WINSEAM_DROPPED && last->kind == e->kind) {
-        if (e->kind == WINSEAM_MOUSE_MOVE) {
-            last->x = e->x; last->y = e->y; last->dx += e->dx; last->dy += e->dy;
+        // One pointer's moves: the newer sample, with the motion summed (AGENTS.window.md item 8, decision 2.4).
+        if (e->kind == WINSEAM_POINTER_MOVE && last->pointer == e->pointer && last->pointer_kind == e->pointer_kind) {
+            double dx = last->dx + e->dx, dy = last->dy + e->dy;
+            *last = *e;
+            last->dx = dx; last->dy = dy;
             return 1;
         }
-        if (e->kind == WINSEAM_SCROLL) { last->dx += e->dx; last->dy += e->dy; return 1; }
+        if (e->kind == WINSEAM_SCROLL && last->a == e->a) { last->dx += e->dx; last->dy += e->dy; return 1; }
         if (e->kind == WINSEAM_RESIZE || e->kind == WINSEAM_SCALE_CHANGED) { *last = *e; return 1; }
     }
     if ((int64_t)w->count + 1 + owed <= RING - 1) {
@@ -98,13 +127,7 @@ static int store(winseam_window *w, const winseam_event *e, int32_t owed, int ke
         w->count += 1;
         return 1;
     }
-    if (last != NULL && last->kind == WINSEAM_DROPPED) { last->a += 1; return 0; }
-    winseam_event d;
-    memset(&d, 0, sizeof d);
-    d.kind = WINSEAM_DROPPED;
-    d.a = 1;
-    w->ring[(w->head + w->count) % RING] = d;
-    w->count += 1;
+    count_drop(w, 1);
     return 0;
 }
 
@@ -124,12 +147,33 @@ static void hold_key(winseam_window *w, int32_t hid, int held) {
     w->held_count += held ? 1 : -1;
 }
 
-static int button_held(const winseam_window *w, int32_t button) { return (w->held_buttons >> button) & 1; }
+// The pointer `e` is from, when it holds a button. Pointers are told apart by id and kind together.
+static held_pointer *held_pointer_of(winseam_window *w, const winseam_event *e) {
+    for (int32_t i = 0; i < w->pointer_count; i++) {
+        held_pointer *h = &w->pointers[i];
+        if (h->last.pointer == e->pointer && h->last.pointer_kind == e->pointer_kind) return h;
+    }
+    return NULL;
+}
 
-static void hold_button(winseam_window *w, int32_t button, int held) {
-    if (button_held(w, button) == held) return;
-    w->held_buttons ^= (uint8_t)(1u << button);
-    w->held_count += held ? 1 : -1;
+// A pointer that holds nothing now, out of the table, which keeps the order the others went down in.
+static void forget_pointer(winseam_window *w, held_pointer *h) {
+    int32_t i = (int32_t)(h - w->pointers);
+    memmove(&w->pointers[i], &w->pointers[i + 1], (size_t)(w->pointer_count - i - 1) * sizeof *h);
+    w->pointer_count -= 1;
+}
+
+static int32_t bits_in(int32_t bits) {
+    int32_t n = 0;
+    for (; bits != 0; bits &= bits - 1) n += 1;
+    return n;
+}
+
+// What the window says a pointer holds after an event, and a mouse's pressure from it: 0.5 while a button is held, the
+// W3C's rule for a device that reports none.
+static void set_buttons(winseam_event *e, int32_t held) {
+    e->buttons = held;
+    if (e->pointer_kind == WINSEAM_POINTER_MOUSE) e->pressure = held != 0 ? 0.5f : 0.0f;
 }
 
 // The modifier bits of the keys held now, with the lock bits last reported: what an up the window makes carries.
@@ -142,18 +186,34 @@ static int32_t held_mods(const winseam_window *w) {
     return m;
 }
 
-// An up for every held button, then every held key by ascending HID id, so the modifiers (224 to 231) go last: the
-// action goes up before the modifier that chose it. Each carries the modifiers still held after it. The ring owes each
-// of them, so none is counted into a drop.
+// The end of every pointer holding a button, in the order they went down: a mouse's buttons go up, by number, and a
+// touch or pen contact is cancelled, since it never lifted and a tap must not fire (AGENTS.window.md item 8, decision
+// 2.3). Each is at the pointer's last position. Then an up for every held key by ascending HID id, so the modifiers
+// (224 to 231) go last: the action goes up before the modifier that chose it. Each up carries the modifiers still held
+// after it. The ring owes each of them, so none is counted into a drop.
 static void release_held(winseam_window *w) {
     winseam_event e;
-    for (int32_t b = 0; b < 8; b++) {
-        if (!button_held(w, b)) continue;
-        hold_button(w, b, 0);
-        memset(&e, 0, sizeof e);
-        e.kind = WINSEAM_MOUSE_BUTTON; e.a = b; e.b = held_mods(w); e.c = 0;
-        e.x = w->last_x; e.y = w->last_y;
-        store(w, &e, w->held_count, 1);
+    while (w->pointer_count > 0) {
+        held_pointer *h = &w->pointers[0];
+        if (h->last.pointer_kind == WINSEAM_POINTER_MOUSE) {
+            for (int32_t b = 0; b < WINSEAM_BUTTONS; b++) {
+                if (((h->held >> b) & 1) == 0) continue;
+                h->held &= ~(1 << b);
+                w->held_count -= 1;
+                e = h->last;
+                e.kind = WINSEAM_POINTER_UP; e.a = b; e.b = held_mods(w); e.c = 0; e.dx = 0; e.dy = 0;
+                set_buttons(&e, h->held);
+                store(w, &e, w->held_count, 1);
+            }
+        } else {
+            w->held_count -= bits_in(h->held);
+            e = h->last;
+            e.kind = WINSEAM_POINTER_CANCEL; e.a = 0; e.b = 0; e.c = 0; e.dx = 0; e.dy = 0;
+            set_buttons(&e, 0);
+            e.pressure = 0.0f;
+            store(w, &e, w->held_count, 1);
+        }
+        forget_pointer(w, h);
     }
     for (int32_t hid = 1; hid < 256; hid++) {
         if (!key_held(w, hid)) continue;
@@ -167,15 +227,66 @@ static void release_held(winseam_window *w) {
 
 void winseam_release_held(winseam_window *w) { release_held(w); }
 
+// A pointer's event: its buttons held per pointer, as keys are (AGENTS.window.md item 8, decision 2).
+// - An up for a button the pointer does not hold is dropped, and so is a second down for one it does, or for a button
+//   no table names.
+// - A down from a pointer holding nothing, while 16 others hold something, is counted into the drop.
+// - A cancel ends what the pointer holds, with no ups; one for a pointer holding nothing is dropped.
+// - Every event carries what the pointer holds after it.
+static void take_pointer(winseam_window *w, const winseam_event *e) {
+    winseam_event p = *e;
+    held_pointer *h = held_pointer_of(w, e);
+    int32_t held = h != NULL ? h->held : 0;
+    if (p.kind == WINSEAM_POINTER_DOWN || p.kind == WINSEAM_POINTER_UP) {
+        if (p.a < 0 || p.a >= WINSEAM_BUTTONS) return;
+        int32_t bit = 1 << p.a;
+        if (p.kind == WINSEAM_POINTER_DOWN) {
+            if ((held & bit) != 0) return;
+            if (h == NULL && w->pointer_count == POINTERS) { count_drop(w, 1); return; }
+            set_buttons(&p, held | bit);
+            if (!store(w, &p, w->held_count + 1, 0)) return;   // counted into the drop: not held
+            if (h == NULL) {
+                h = &w->pointers[w->pointer_count];
+                w->pointer_count += 1;
+                h->held = 0;
+            }
+            h->held |= bit;
+            h->last = p;
+            w->held_count += 1;
+            return;
+        }
+        if ((held & bit) == 0) return;
+        h->held &= ~bit;
+        w->held_count -= 1;
+        set_buttons(&p, h->held);
+        h->last = p;
+        if (h->held == 0) forget_pointer(w, h);
+        store(w, &p, w->held_count, 1);
+        return;
+    }
+    if (p.kind == WINSEAM_POINTER_CANCEL) {
+        if (h == NULL) return;
+        w->held_count -= bits_in(h->held);
+        forget_pointer(w, h);
+        set_buttons(&p, 0);
+        store(w, &p, w->held_count, 1);
+        return;
+    }
+    set_buttons(&p, held);   // a move, an enter or a leave
+    if (h != NULL) h->last = p;
+    store(w, &p, w->held_count, 0);
+}
+
 // Every event the window takes, from the system's callbacks and from `post`, comes through here: the held set's rules,
 // then the ring.
 // - An up for a key or button not held is dropped.
 // - A key's down is a press when the key is not held, and holds it; a repeat when it is, whatever the system said. A
 //   down that is counted into a drop is not held: the consumer never saw it.
-// - A second down for a held button is dropped.
+// - A pointer's buttons, as `take_pointer` says.
 // - A focus change, either way, releases everything held, then gives back a lock a loss undoes, then says Focus.
 static void take(winseam_window *w, const winseam_event *e) {
-    if (e->kind == WINSEAM_KEY_DOWN || e->kind == WINSEAM_KEY_UP || e->kind == WINSEAM_MOUSE_BUTTON) {
+    if (e->kind == WINSEAM_KEY_DOWN || e->kind == WINSEAM_KEY_UP || e->kind == WINSEAM_POINTER_DOWN ||
+        e->kind == WINSEAM_POINTER_UP) {
         w->lock_bits = e->b & (16 | 32);   // CapsLock, NumLock
     }
     if ((e->kind == WINSEAM_KEY_DOWN || e->kind == WINSEAM_KEY_UP) && holdable(e->a)) {
@@ -192,16 +303,8 @@ static void take(winseam_window *w, const winseam_event *e) {
         if (store(w, &k, w->held_count + 1, 0)) hold_key(w, hid, 1);
         return;
     }
-    if (e->kind == WINSEAM_MOUSE_BUTTON && e->a >= 0 && e->a < 8) {
-        int32_t b = e->a;
-        if (e->c) {
-            if (button_held(w, b)) return;
-            if (store(w, e, w->held_count + 1, 0)) hold_button(w, b, 1);
-            return;
-        }
-        if (!button_held(w, b)) return;
-        hold_button(w, b, 0);
-        store(w, e, w->held_count, 1);
+    if (e->kind >= WINSEAM_POINTER_MOVE && e->kind <= WINSEAM_POINTER_LEAVE) {
+        take_pointer(w, e);
         return;
     }
     if (e->kind == WINSEAM_FOCUS) {
@@ -343,8 +446,51 @@ static void on_key(GLFWwindow *g, int key, int scancode, int action, int mods) {
 
 static void on_char(GLFWwindow *g, unsigned int codepoint) { push_simple(of(g), WINSEAM_TEXT, (int32_t)codepoint, 0, 0); }
 
+// GLFW numbers a mouse's buttons left, right, middle; the W3C's `button`, left, middle, right, then back, forward and
+// (5) a pen's eraser. GLFW's sixth to eighth follow at 6.
+int32_t winseam_glfw_button_to_pointer(int32_t b) {
+    switch (b) {
+        case GLFW_MOUSE_BUTTON_LEFT: return 0;
+        case GLFW_MOUSE_BUTTON_MIDDLE: return 1;
+        case GLFW_MOUSE_BUTTON_RIGHT: return 2;
+        case GLFW_MOUSE_BUTTON_4: return 3;
+        case GLFW_MOUSE_BUTTON_5: return 4;
+        case GLFW_MOUSE_BUTTON_6: return 6;
+        case GLFW_MOUSE_BUTTON_7: return 7;
+        case GLFW_MOUSE_BUTTON_8: return 8;
+        default: return -1;
+    }
+}
+
+// The mouse as a pointer, as a browser reports it: pointer 1, primary, one unit across, at its last position.
+static void mouse_record(winseam_window *w, winseam_event *e, int32_t kind) {
+    memset(e, 0, sizeof *e);
+    e->kind = kind;
+    e->x = w->last_x; e->y = w->last_y;
+    e->pointer = 1;
+    e->pointer_kind = WINSEAM_POINTER_MOUSE;
+    e->primary = 1;
+    e->width = 1.0f; e->height = 1.0f;
+}
+
 static void on_mouse_button(GLFWwindow *g, int button, int action, int mods) {
-    push_simple(of(g), WINSEAM_MOUSE_BUTTON, (int32_t)button, mods_of(mods), action == GLFW_PRESS ? 1 : 0);
+    winseam_window *w = of(g);
+    int32_t b = winseam_glfw_button_to_pointer((int32_t)button);
+    if (b < 0) return;
+    winseam_event e;
+    mouse_record(w, &e, action == GLFW_PRESS ? WINSEAM_POINTER_DOWN : WINSEAM_POINTER_UP);
+    e.a = b;
+    e.b = mods_of(mods);
+    push(w, &e);
+}
+
+// The mouse entering or leaving the window, where GLFW says the cursor is.
+static void on_cursor_enter(GLFWwindow *g, int entered) {
+    winseam_window *w = of(g);
+    winseam_event e;
+    mouse_record(w, &e, entered ? WINSEAM_POINTER_ENTER : WINSEAM_POINTER_LEAVE);
+    glfwGetCursorPos(g, &e.x, &e.y);
+    push(w, &e);
 }
 
 // Positions are GLFW's screen coordinates, the logical ones. Locked, the position means nothing and the delta is the
@@ -352,8 +498,7 @@ static void on_mouse_button(GLFWwindow *g, int button, int action, int mods) {
 static void on_cursor(GLFWwindow *g, double x, double y) {
     winseam_window *w = of(g);
     winseam_event e;
-    memset(&e, 0, sizeof e);
-    e.kind = WINSEAM_MOUSE_MOVE;
+    mouse_record(w, &e, WINSEAM_POINTER_MOVE);
     e.x = x; e.y = y;
     if (w->have_last) { e.dx = x - w->last_x; e.dy = y - w->last_y; }
     w->have_last = 1;
@@ -366,6 +511,7 @@ static void on_scroll(GLFWwindow *g, double dx, double dy) {
     winseam_event e;
     memset(&e, 0, sizeof e);
     e.kind = WINSEAM_SCROLL;
+    e.a = 0;   // lines: GLFW's offsets are a wheel's notches
     e.dx = dx; e.dy = dy;
     push(w, &e);
 }
@@ -440,6 +586,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
     glfwSetCharCallback(w->glfw, on_char);
     glfwSetMouseButtonCallback(w->glfw, on_mouse_button);
     glfwSetCursorPosCallback(w->glfw, on_cursor);
+    glfwSetCursorEnterCallback(w->glfw, on_cursor_enter);
     glfwSetScrollCallback(w->glfw, on_scroll);
     glfwSetWindowSizeCallback(w->glfw, on_size);
     glfwSetFramebufferSizeCallback(w->glfw, on_framebuffer_size);
@@ -466,6 +613,7 @@ static void system_close(winseam_window *w) {
     glfwSetCharCallback(w->glfw, NULL);
     glfwSetMouseButtonCallback(w->glfw, NULL);
     glfwSetCursorPosCallback(w->glfw, NULL);
+    glfwSetCursorEnterCallback(w->glfw, NULL);
     glfwSetScrollCallback(w->glfw, NULL);
     glfwSetWindowSizeCallback(w->glfw, NULL);
     glfwSetFramebufferSizeCallback(w->glfw, NULL);
@@ -538,6 +686,7 @@ void *winseam_native_window(winseam_window *w) {
 // ---- the web: not built yet (KR-26's commit 2, html5 callbacks on #canvas) -------------------------------------------
 
 int32_t winseam_glfw_key_to_hid(int32_t k) { (void)k; return 0; }
+int32_t winseam_glfw_button_to_pointer(int32_t b) { (void)b; return -1; }
 
 winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, uint8_t *why,
                              int32_t capacity, int32_t *why_length) {

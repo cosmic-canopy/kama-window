@@ -2,12 +2,13 @@ file @compileFor(!ARCH_WASM32);
 // The key table, tested by externing the C translator (kama's design: "the key tables are tested by externing the C
 // translators directly"), against GLFW's own key constants rather than numbers typed here.
 
-import { Tally, window::Key };
-export { keyTable };
+import { Tally, window::Key, window::PointerButton };
+export { keyTable, buttonTable };
 
 extern "winseam.h";
 extern "<GLFW/glfw3.h>";
 extern fn int32 winseam_glfw_key_to_hid(int32 glfw_key);
+extern fn int32 winseam_glfw_button_to_pointer(int32 glfw_button);
 
 extern const int32 GLFW_KEY_A;
 extern const int32 GLFW_KEY_Z;
@@ -24,6 +25,14 @@ extern const int32 GLFW_KEY_F24;
 extern const int32 GLFW_KEY_UP;
 extern const int32 GLFW_KEY_WORLD_1;
 extern const int32 GLFW_KEY_LAST;
+extern const int32 GLFW_MOUSE_BUTTON_LEFT;
+extern const int32 GLFW_MOUSE_BUTTON_RIGHT;
+extern const int32 GLFW_MOUSE_BUTTON_MIDDLE;
+extern const int32 GLFW_MOUSE_BUTTON_4;
+extern const int32 GLFW_MOUSE_BUTTON_5;
+extern const int32 GLFW_MOUSE_BUTTON_6;
+extern const int32 GLFW_MOUSE_BUTTON_7;
+extern const int32 GLFW_MOUSE_BUTTON_8;
 
 unsafe fn int32 hidOf(int32 glfwKey) { return winseam_glfw_key_to_hid(glfw_key: glfwKey); }
 
@@ -78,4 +87,24 @@ unsafe fn void keyTable(ref Tally t) {
         t.verdict(name: "every GLFW key is unmapped or one Key of its own",
                   why: "${mapped} mapped, ${notAKey} to no Key, ${twice} sharing an id");
     }
+}
+
+unsafe fn void button(ref Tally t, int32 glfwButton, PointerButton want, const ref string name) {
+    int32 got = winseam_glfw_button_to_pointer(glfw_button: glfwButton);
+    int32 w = cast<int32>(want);
+    if (got == w) { t.verdict(name: "GLFW's ${name} button is PointerButton ${w}", why: ""); }
+    else { t.verdict(name: "GLFW's ${name} button is PointerButton ${w}", why: "the table gives ${got}"); }
+}
+
+// GLFW numbers a mouse's buttons left, right, middle; PointerButton as the W3C's `button` does, left, middle, right
+// (WIN-3, AGENTS.window.md item 8, decision 2.5). Every GLFW button maps, and none to the pen's eraser.
+unsafe fn void buttonTable(ref Tally t) {
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_LEFT, want: PointerButton::Left, name: "left");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_RIGHT, want: PointerButton::Right, name: "right");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_MIDDLE, want: PointerButton::Middle, name: "middle");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_4, want: PointerButton::Back, name: "fourth");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_5, want: PointerButton::Forward, name: "fifth");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_6, want: PointerButton::Sixth, name: "sixth");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_7, want: PointerButton::Seventh, name: "seventh");
+    button(t: t, glfwButton: GLFW_MOUSE_BUTTON_8, want: PointerButton::Eighth, name: "eighth");
 }

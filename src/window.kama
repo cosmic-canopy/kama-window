@@ -9,6 +9,9 @@
 //   whatever the layout; typed text arrives separately, as `Text`.
 // - The window keeps what is held (WIN-2, AGENTS.window.md item 5): every up follows its down, every down is followed in
 //   time by its up, and a focus change, either way, releases every held button and key before its `Focus`.
+// - The mouse, touch and a pen are one stream of pointer events, as the W3C's Pointer Events are (WIN-3,
+//   AGENTS.window.md item 8): each carries its `Pointer`, every button has its own down and up, and a focus change
+//   cancels a held touch or pen contact.
 // - Positions and sizes are logical; `scale()` converts to pixels, and `framebufferSize()` is in pixels.
 // - It is not `Sendable`: a window lives on the thread that opened it, which GLFW requires.
 
@@ -17,7 +20,9 @@ import {
     std::encoding::utf8::decode, std::encoding::utf8::Utf8Error,
     window::native::winseam_event,
     window::native::KIND_KEY_DOWN, window::native::KIND_KEY_UP, window::native::KIND_TEXT,
-    window::native::KIND_MOUSE_MOVE, window::native::KIND_MOUSE_BUTTON, window::native::KIND_SCROLL,
+    window::native::KIND_POINTER_MOVE, window::native::KIND_POINTER_DOWN, window::native::KIND_POINTER_UP,
+    window::native::KIND_POINTER_CANCEL, window::native::KIND_POINTER_ENTER, window::native::KIND_POINTER_LEAVE,
+    window::native::KIND_SCROLL,
     window::native::KIND_RESIZE, window::native::KIND_SCALE_CHANGED, window::native::KIND_FOCUS,
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
@@ -28,7 +33,10 @@ import {
     window::native::nativeKind, window::native::nativeDisplay, window::native::nativeWindow,
 };
 
-export { Window, WindowOptions, WindowError, Event, Key, MouseButton, Mods, CursorMode, Size, NativeKind, NativeWindow };
+export {
+    Window, WindowOptions, WindowError, Event, Key, Pointer, PointerKind, PointerButton, ScrollUnit, Mods, CursorMode,
+    Size, NativeKind, NativeWindow,
+};
 
 type enum WindowError implements Error {
     Refused(string words);   // the system would not open the window, in its words
@@ -36,7 +44,7 @@ type enum WindowError implements Error {
     public const fn string message() { return match (this) { case Refused(words: w): copy w; }; }
 }
 
-// Modifier bits, as `KeyDown`, `KeyUp` and `MouseButton` carry them: `(mods & Mods::Shift) != 0`.
+// Modifier bits, as `KeyDown`, `KeyUp`, `PointerDown` and `PointerUp` carry them: `(mods & Mods::Shift) != 0`.
 type value Mods {
     public comptime uint8 Shift = 1;
     public comptime uint8 Control = 2;
@@ -46,7 +54,57 @@ type value Mods {
     public comptime uint8 NumLock = 32;
 }
 
-type enum MouseButton : uint8 { Left = 0, Right = 1, Middle = 2, Back = 3, Forward = 4, Sixth = 5, Seventh = 6, Eighth = 7 }
+// A pointer's button, numbered as the W3C's `button` is: a touch contact and a pen's tip are `Left`, a pen's barrel
+// `Right`. A mouse's sixth to eighth follow the pen's eraser.
+type enum PointerButton : uint8 {
+    Left = 0, Middle = 1, Right = 2, Back = 3, Forward = 4, Eraser = 5, Sixth = 6, Seventh = 7, Eighth = 8
+}
+
+type enum PointerKind : uint8 { Mouse = 0, Touch = 1, Pen = 2 }
+
+// What a `Scroll` counts: lines, which a wheel's notch is natively and a browser may report, or pixels, which a browser
+// and a touchpad report. Nothing converts one into the other.
+type enum ScrollUnit : uint8 { Lines = 0, Pixels = 1 }
+
+// One pointer as an event saw it: a W3C PointerEvent's fields, named as the DOM names them. The mouse is pointer 1;
+// each touch contact has an id of its own, never reused. Positions and sizes are logical.
+@generate(of)
+type value Pointer {
+    public int32 id;
+    public PointerKind kind;
+    public bool primary;      // the first touch contact, the mouse, a pen
+    public float64 x;
+    public float64 y;
+    public uint16 buttons;    // what the window holds for this pointer after the event: a bit per PointerButton
+    public float32 pressure;  // 0 to 1; a mouse's is 0.5 while a button is held, else 0
+    public float32 tiltX;     // degrees, -90 to 90
+    public float32 tiltY;
+    public float32 twist;     // degrees, 0 to 359
+    public float32 width;     // the contact's size; 1 for a mouse
+    public float32 height;
+
+    // A primary pointer of one unit, at `x`, `y`, holding nothing, at rest: what a posted event starts from.
+    public ctor at(int32 id, PointerKind kind, float64 x, float64 y) {
+        this.id = id;
+        this.kind = kind;
+        this.primary = true;
+        this.x = x;
+        this.y = y;
+        this.buttons = 0;
+        this.pressure = 0.0;
+        this.tiltX = 0.0;
+        this.tiltY = 0.0;
+        this.twist = 0.0;
+        this.width = 1.0;
+        this.height = 1.0;
+    }
+
+    // Whether `buttons` holds `button`.
+    public const fn bool pressed(PointerButton button) {
+        int32 bit = 1 << cast<int32>(button);
+        return (cast<int32>(this.buttons) & bit) != 0;
+    }
+}
 
 type enum CursorMode { Normal, Hidden, Locked }
 
@@ -83,9 +141,13 @@ type enum Event {
     KeyDown(Key key, uint8 mods, bool repeat),
     KeyUp(Key key, uint8 mods),
     Text(char c),
-    MouseMove(float64 x, float64 y, float64 dx, float64 dy),   // locked, x and y mean nothing and dx, dy are raw
-    MouseButton(MouseButton button, bool down, uint8 mods),
-    Scroll(float64 dx, float64 dy),
+    PointerMove(Pointer pointer, float64 dx, float64 dy),        // locked, x and y mean nothing and dx, dy are raw
+    PointerDown(Pointer pointer, PointerButton button, uint8 mods),
+    PointerUp(Pointer pointer, PointerButton button, uint8 mods),
+    PointerCancel(Pointer pointer),                              // it ends, with no up: the system or a focus change took it
+    PointerEnter(Pointer pointer),
+    PointerLeave(Pointer pointer),
+    Scroll(float64 dx, float64 dy, ScrollUnit unit),             // positive is left and up, as GLFW and winit report
     Resize(int32 width, int32 height),
     ScaleChanged(float32 scale),
     Focus(bool focused),
@@ -157,13 +219,43 @@ unsafe fn Key keyOf(int32 hid) {
     };
 }
 
-unsafe fn MouseButton buttonOf(int32 n) {
-    if (n < 0 || n > 255) { return MouseButton::Eighth; }
-    Optional<MouseButton> b = try cast<MouseButton>(cast<uint8>(n));
+// The ring holds only the buttons PointerButton names (it drops any other), so the fallback is never taken.
+unsafe fn PointerButton buttonOf(int32 n) {
+    if (n < 0 || n > 255) { return PointerButton::Left; }
+    Optional<PointerButton> b = try cast<PointerButton>(cast<uint8>(n));
     return match (b) {
         case Some(value: v): v;
-        case None: MouseButton::Eighth;
+        case None: PointerButton::Left;
     };
+}
+
+unsafe fn PointerKind pointerKindOf(int32 n) {
+    if (n == 1) { return PointerKind::Touch; }
+    if (n == 2) { return PointerKind::Pen; }
+    return PointerKind::Mouse;
+}
+
+// The pointer a ring record carries.
+unsafe fn Pointer pointerOf(const ref winseam_event e) {
+    return Pointer.of(id: e.pointer, kind: pointerKindOf(n: e.pointer_kind), primary: e.primary != 0, x: e.x, y: e.y,
+                      buttons: truncate<uint16>(e.buttons), pressure: e.pressure, tiltX: e.tilt_x, tiltY: e.tilt_y,
+                      twist: e.twist, width: e.width, height: e.height);
+}
+
+// A pointer into a ring record.
+unsafe fn void setPointer(ref winseam_event e, const ref Pointer p) {
+    e.pointer = p.id;
+    e.pointer_kind = cast<int32>(p.kind);
+    if (p.primary) { e.primary = 1; }
+    e.x = p.x;
+    e.y = p.y;
+    e.buttons = cast<int32>(p.buttons);
+    e.pressure = p.pressure;
+    e.tilt_x = p.tiltX;
+    e.tilt_y = p.tiltY;
+    e.twist = p.twist;
+    e.width = p.width;
+    e.height = p.height;
 }
 
 unsafe fn uint8 modsOf(int32 n) { return truncate<uint8>(n & 63); }
@@ -174,11 +266,21 @@ unsafe fn Event eventOf(const ref winseam_event e) {
     if (k == KIND_KEY_DOWN) { return Event::KeyDown(key: keyOf(hid: e.a), mods: modsOf(n: e.b), repeat: e.c != 0); }
     if (k == KIND_KEY_UP) { return Event::KeyUp(key: keyOf(hid: e.a), mods: modsOf(n: e.b)); }
     if (k == KIND_TEXT) { return Event::Text(c: cast<char>(cast<uint32>(e.a))); }
-    if (k == KIND_MOUSE_MOVE) { return Event::MouseMove(x: e.x, y: e.y, dx: e.dx, dy: e.dy); }
-    if (k == KIND_MOUSE_BUTTON) {
-        return Event::MouseButton(button: buttonOf(n: e.a), down: e.c != 0, mods: modsOf(n: e.b));
+    if (k == KIND_POINTER_MOVE) { return Event::PointerMove(pointer: pointerOf(e: e), dx: e.dx, dy: e.dy); }
+    if (k == KIND_POINTER_DOWN) {
+        return Event::PointerDown(pointer: pointerOf(e: e), button: buttonOf(n: e.a), mods: modsOf(n: e.b));
     }
-    if (k == KIND_SCROLL) { return Event::Scroll(dx: e.dx, dy: e.dy); }
+    if (k == KIND_POINTER_UP) {
+        return Event::PointerUp(pointer: pointerOf(e: e), button: buttonOf(n: e.a), mods: modsOf(n: e.b));
+    }
+    if (k == KIND_POINTER_CANCEL) { return Event::PointerCancel(pointer: pointerOf(e: e)); }
+    if (k == KIND_POINTER_ENTER) { return Event::PointerEnter(pointer: pointerOf(e: e)); }
+    if (k == KIND_POINTER_LEAVE) { return Event::PointerLeave(pointer: pointerOf(e: e)); }
+    if (k == KIND_SCROLL) {
+        ScrollUnit unit = ScrollUnit::Lines;
+        if (e.a == 1) { unit = ScrollUnit::Pixels; }
+        return Event::Scroll(dx: e.dx, dy: e.dy, unit: unit);
+    }
     if (k == KIND_RESIZE) { return Event::Resize(width: e.a, height: e.b); }
     if (k == KIND_SCALE_CHANGED) { return Event::ScaleChanged(scale: cast<float32>(e.x)); }
     if (k == KIND_FOCUS) { return Event::Focus(focused: e.a != 0); }
@@ -197,12 +299,20 @@ unsafe fn winseam_event recordOf(const ref Event event) {
         }
         case KeyUp(key: key, mods: mods): { e.kind = KIND_KEY_UP; e.a = cast<int32>(key); e.b = cast<int32>(mods); }
         case Text(c: c): { e.kind = KIND_TEXT; e.a = cast<int32>(c); }
-        case MouseMove(x: x, y: y, dx: dx, dy: dy): { e.kind = KIND_MOUSE_MOVE; e.x = x; e.y = y; e.dx = dx; e.dy = dy; }
-        case MouseButton(button: button, down: down, mods: mods): {
-            e.kind = KIND_MOUSE_BUTTON; e.a = cast<int32>(button); e.b = cast<int32>(mods);
-            if (down) { e.c = 1; }
+        case PointerMove(pointer: p, dx: dx, dy: dy): { e.kind = KIND_POINTER_MOVE; setPointer(e: e, p: p); e.dx = dx; e.dy = dy; }
+        case PointerDown(pointer: p, button: button, mods: mods): {
+            e.kind = KIND_POINTER_DOWN; setPointer(e: e, p: p); e.a = cast<int32>(button); e.b = cast<int32>(mods);
         }
-        case Scroll(dx: dx, dy: dy): { e.kind = KIND_SCROLL; e.dx = dx; e.dy = dy; }
+        case PointerUp(pointer: p, button: button, mods: mods): {
+            e.kind = KIND_POINTER_UP; setPointer(e: e, p: p); e.a = cast<int32>(button); e.b = cast<int32>(mods);
+        }
+        case PointerCancel(pointer: p): { e.kind = KIND_POINTER_CANCEL; setPointer(e: e, p: p); }
+        case PointerEnter(pointer: p): { e.kind = KIND_POINTER_ENTER; setPointer(e: e, p: p); }
+        case PointerLeave(pointer: p): { e.kind = KIND_POINTER_LEAVE; setPointer(e: e, p: p); }
+        case Scroll(dx: dx, dy: dy, unit: unit): {
+            e.kind = KIND_SCROLL; e.dx = dx; e.dy = dy;
+            if (unit == ScrollUnit::Pixels) { e.a = 1; }
+        }
         case Resize(width: w, height: h): { e.kind = KIND_RESIZE; e.a = w; e.b = h; }
         case ScaleChanged(scale: s): { e.kind = KIND_SCALE_CHANGED; e.x = cast<float64>(s); }
         case Focus(focused: f): { e.kind = KIND_FOCUS; if (f) { e.a = 1; } }
@@ -278,8 +388,9 @@ type resource Window {
         postEvent(window: this.seam, event: cast<UnsafeConstPtr>(addr(of: e)));
     }
 
-    // An up for every held mouse button, then every held key, as a focus change makes them and with no Focus after: a
-    // program's own release, for a reason only it knows (a remote desktop that drops key ups, a long stall).
+    // The end of every held pointer (a mouse's buttons up, a touch or pen contact cancelled), then an up for every held
+    // key, as a focus change makes them and with no Focus after: a program's own release, for a reason only it knows (a
+    // remote desktop that drops key ups, a long stall).
     public unsafe fn void releaseHeld() {
         if (this.seam == null) { return; }
         releaseHeldInput(window: this.seam);
