@@ -357,8 +357,7 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
       2. **`title` is ignored on the web.** The page owns its `<title>`, and a canvas may be one part of a page; FFD
          ignores it too.
 
-      How a program names its canvas was found on the way and asked as question 11: a `type value` cannot hold a
-      `string` (kama 0.9.911), so the selector cannot be a public field of `WindowOptions`.
+      How a program names its canvas was found on the way and asked as question 11 (below).
    4. **Focus is the canvas's, not the page's.** Keys are heard on the canvas, so typing in a page's chat box beside the
       game never moves the player; `Focus` follows the canvas's focus and blur, and a tab switch reaches the canvas too
       (measured), so WIN-2's release runs. `focused: true` (the default) focuses the canvas at open, as a native window
@@ -406,6 +405,19 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
           print a request, and the driver performs it as trusted input. The node leg stays, for the headless cases.
        2. **Firefox is a row of its own before the first publish (WIN-18):** it dropped the DevTools protocol, so it
           needs a WebDriver BiDi client and Firefox installed. Safari waits for a Mac (WIN-12).
+   11. **A canvas is named by a ctor of its own, `Window.openIn(canvas:, title:, width:, height:, options:)`** (asked on
+       the way, decided by the owner on 2026-11-11 as recommended: "I think I'll take your recommendation for q11").
+       - **Found:** the draft was `options.canvas = "#game"`, but a `type value` cannot hold a `string` (kama 0.9.911:
+         "a `value` owns nothing, but … transitively owns a resource — declare it `type resource`"), and a resource's
+         fields are private, which would reverse WIN-16's `o.focused = false`.
+       - **So the selector is a parameter,** as kama's `std::net` spells an address: "always spelled, never defaulted:
+         it is what kind of socket this is, not a policy". Which canvas is what the window is. `open` and `openWith`
+         take `#canvas`, emscripten's own name for it, and `WindowOptions` stays a value of policy flags (`focused`,
+         `sizedByPage`).
+       - **Natively the selector is ignored, as the web ignores `title`:** a browser editor's four viewports, each
+         `openIn` its own canvas, are four system windows natively with the same code.
+       - The alternative, `WindowOptions` as a resource with setters (kama's `std::process` `Command` builder is the
+         precedent), was not taken.
 
 ## Where the truth is
 

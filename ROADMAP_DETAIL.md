@@ -13,7 +13,7 @@ same `Event`s and methods. Where a platform cannot, the SPEC says so for that pl
 
 Today `Window.open` refuses on the web. This row makes a window on a canvas, and Pointer Events on every backend. Its
 questions were decided on 2026-11-11 ([AGENTS.window.md](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input)
-item 8), after a probe in headless Edge; question 11, how a program names its canvas, is open.
+item 8), after a probe in headless Edge, with question 11, how a program names its canvas, found on the way.
 
 - **It starts from friendly-fire-department's web platform header** (`gfx/src/platform/ffd_platform.h`), but not its
   html5 callbacks: emsdk's `html5.h` has no Pointer Events, ResizeObserver or pixel-ratio change. The package ships a
@@ -26,7 +26,9 @@ item 8), after a probe in headless Edge; question 11, how a program names its ca
      (decision 9). GLFW's mouse becomes pointer 1, and the tests are ported.
   2. **The browser leg** (decision 10): a node driver and a static server in `tools/`, a test shell page, and
      `tools/test.sh` running `tests/` in headless Edge, proven on the headless cases before the web window exists.
-  3. **The web window:** `winseam.c`'s web half and the JS library. On a canvas named by question 11's answer:
+  3. **The web window:** `winseam.c`'s web half and the JS library, on the page's `#canvas` through `open` and
+     `openWith`, and on any canvas through `Window.openIn(canvas:, …)` (question 11), several canvases being several
+     windows:
      - the refusals and the canvas left as found (decision 3);
      - keys from `KeyboardEvent.code` through one table, with its own test (`tests/src/keys_web.kama`), `Text` from
        the `keydown`'s `key`, and what the window prevents (decision 5);
