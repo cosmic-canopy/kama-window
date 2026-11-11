@@ -8,6 +8,7 @@
   "modules": {
     ".": { "visibility": "internal" }
   },
+  "shellFile": "web/shell.html",
   "cincludes": ["csrc"],
   "csources": ["csrc/hooks.c"],
   "dependencies": {

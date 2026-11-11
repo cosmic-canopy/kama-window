@@ -182,3 +182,9 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
   the program shows no more once one has taken the foreground;
 - the same program under node: 97 cases, the headless ones, and checks that opening a window refuses.
+- the same program in a headless Chromium (Edge or Chrome; `KAMA_WINDOW_BROWSER` names another), built for the web with
+  its own page, `tests/web/shell.html`: 97 cases. `tools/webtest.mjs` (node, no npm packages) serves it, runs the
+  browser over the DevTools protocol with a throwaway profile at a device scale of 1.5, and reads the console to the
+  summary line, an abort, an exception or a time limit. A case that needs the browser's own behaviour asks the driver
+  for trusted input (a click, a key, a touch) by printing a request. Skipped, and said so, with no browser, `emcc` or
+  `node`.

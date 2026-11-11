@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>@kama/window tests</title>
+<!--
+  The page the tests program runs in, in the browser leg (tools/webtest.mjs). Its elements are what the web window's
+  cases open on and focus between:
+  - #canvas, emscripten's own name for a program's canvas, which `Window.open` takes;
+  - #second, a second canvas with a tabindex of its own, which a window must keep;
+  - #paged, a canvas the page lays out (200 × 100 CSS pixels), for a window that leaves its size to the page;
+  - #field, a text field beside them, whose keys are the page's;
+  - #plain, an element that is not a canvas.
+  The program's output goes to the console, which the driver reads.
+-->
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { font: 13px system-ui, sans-serif; }
+  canvas { display: block; }
+  #second { margin-top: 8px; }
+  #panel { width: 200px; height: 100px; margin-top: 8px; }
+  #paged { width: 100%; height: 100%; }
+  #field { margin-top: 8px; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<canvas id="second" tabindex="-1"></canvas>
+<div id="panel"><canvas id="paged"></canvas></div>
+<input id="field" type="text">
+<div id="plain">not a canvas</div>
+<script>
+  var Module = {
+    print: function (text) { console.log(text); },
+    printErr: function (text) { console.error(text); },
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>
