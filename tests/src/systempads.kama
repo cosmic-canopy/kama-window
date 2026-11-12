@@ -1,0 +1,288 @@
+// WIN-4 part B: the system's pads, natively. Every pump reads them once and hands each slot to every open system window
+// (decision 1), so one pump on any window fills them all, as GLFW's events do; a headless window has none. The tests
+// replace the system's read with their own (decision 8), and see SDL's own path through a virtual pad SDL attaches,
+// found by its name among whatever real pads are plugged in, so a run never depends on them or rumbles one.
+
+import {
+    core::println,
+    core::env::envOr,
+    Tally, drained, expectDrained, quietly,
+    window::Window, window::WindowError, window::WindowOptions, window::Gamepad, window::PadButton, window::PadAxis,
+    window::PadInfo,
+};
+export { systemPadCases, noSystemPads };
+
+extern "winseam.h";
+extern fn void winseam_pads_from_system(int32 on);
+extern fn void winseam_system_pad(int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
+                                  UnsafeConstPtr<float32> axes, UnsafeConstPtr<cchar> name, int32 vendor, int32 product,
+                                  UnsafeConstPtr<cchar> serial, UnsafeConstPtr<cchar> id);
+
+extern "hooks.h";
+extern fn int32 windowtests_win32();
+extern fn uint32 windowtests_virtual_pad(UnsafeConstPtr<cchar> name);
+extern fn int32 windowtests_virtual_button(uint32 id, int32 button, int32 down);
+extern fn int32 windowtests_virtual_axis(uint32 id, int32 axis, int32 value);
+extern fn void windowtests_virtual_detach(uint32 id);
+extern fn UnsafePtr windowtests_sigint_handler();
+extern fn int32 windowtests_sdl_running();
+
+fn void check(ref Tally t, const ref string name, bool ok, const ref string why) {
+    if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
+}
+
+// Options for a test's system window: unfocused, as every test window is, and reading pads in the background, so the
+// pad's buttons reach it though it never has the focus.
+fn WindowOptions padWindow() {
+    WindowOptions o = quietly();
+    o.padsWhenUnfocused = true;
+    return o;
+}
+
+// The system's slot `slot` set as the system would, from `pad`.
+unsafe fn void systemPad(int32 slot, const ref Gamepad pad, const ref string name, int32 vendor, int32 product,
+                         const ref string serial, const ref string id) {
+    int32 connected = 0;
+    if (pad.connected) { connected = 1; }
+    winseam_system_pad(slot: slot, connected: connected, buttons: addr(of: pad.buttons[0]), axes: addr(of: pad.axes[0]),
+                       name: name.cstr(), vendor: vendor, product: product, serial: serial.cstr(), id: id.cstr());
+}
+
+fn Gamepad pressing(PadButton button) {
+    Gamepad g = Gamepad.neutral();
+    g.press(button: button);
+    return g;
+}
+
+// What `padInfo(slot)` says, as text: "name vendor product serial id", or "none".
+unsafe fn string infoText(const ref Window w, int32 slot) {
+    Optional<PadInfo> info = w.padInfo(slot: slot);
+    match (info) {
+        case Some(value: i): {
+            int32 v = cast<int32>(i.vendor());
+            int32 p = cast<int32>(i.product());
+            string name = i.name();
+            string serial = i.serial();
+            string id = i.id();
+            return "${name} ${v} ${p} ${serial} ${id}";
+        }
+        case None: { return "none"; }
+    };
+}
+
+// The read replaced: one pump on either window reads the slot into both; a disconnect reaches both; a window opened
+// while a pad is in sees it connect at its first pump; a headless window reads none of it.
+@compileFor(!ARCH_WASM32)
+unsafe fn void replacedRead(ref Tally t) {
+    Result<Window, WindowError> openedA = Window.openWith(title: "@kama/window pads A", width: 160, height: 100,
+                                                          options: padWindow());
+    Result<Window, WindowError> openedB = Window.openWith(title: "@kama/window pads B", width: 160, height: 100,
+                                                          options: padWindow());
+    match (give openedA) {
+        case Err(error: e): { string why = e.message(); t.verdict(name: "system pads: two windows open", why: why); return; }
+        case Ok(value: a): {
+            match (give openedB) {
+                case Err(error: e): { string why = e.message(); t.verdict(name: "system pads: two windows open", why: why); return; }
+                case Ok(value: b): {
+                    Window h = Window.headless(width: 64, height: 64);
+                    winseam_pads_from_system(on: 0);
+                    a.pump();
+                    string ignored = drained(w: a);
+                    ignored = drained(w: b);
+
+                    Gamepad south = pressing(button: PadButton::South);
+                    systemPad(slot: 0, pad: south, name: "a test pad", vendor: 1118, product: 2834, serial: "S-1",
+                              id: "ID-1");
+                    a.pump();
+                    expectDrained(t: t, w: a, name: "a pump reads the system's pads into its window",
+                                  want: "PadConnected 0; PadButtonDown 0 0");
+                    expectDrained(t: t, w: b, name: "a pump reads the system's pads into every open system window",
+                                  want: "PadConnected 0; PadButtonDown 0 0");
+                    string info = infoText(w: a, slot: 0);
+                    check(t: t, name: "a pad's info is what the system says of it", ok: info == "a test pad 1118 2834 S-1 ID-1",
+                          why: "it is `${info}`");
+                    h.pump();
+                    expectDrained(t: t, w: h, name: "a headless window reads no system pads", want: "");
+                    string headlessInfo = infoText(w: h, slot: 0);
+                    check(t: t, name: "a headless window has no pad info", ok: headlessInfo == "none",
+                          why: "it is `${headlessInfo}`");
+                    h.postPad(slot: 0, pad: Gamepad.neutral());
+                    string postedInfo = infoText(w: h, slot: 0);
+                    check(t: t, name: "a headless window's posted pad has no system info, though the system has a pad there",
+                          ok: postedInfo == "none", why: "it is `${postedInfo}`");
+
+                    Gamepad gone = Gamepad.disconnected();
+                    systemPad(slot: 0, pad: gone, name: "", vendor: 0, product: 0, serial: "", id: "");
+                    b.pump();
+                    expectDrained(t: t, w: a, name: "a system pad's disconnect reaches every window",
+                                  want: "PadButtonUp 0 0; PadDisconnected 0");
+                    expectDrained(t: t, w: b, name: "a system pad's disconnect reaches the pumped window",
+                                  want: "PadButtonUp 0 0; PadDisconnected 0");
+                    string goneInfo = infoText(w: a, slot: 0);
+                    check(t: t, name: "a disconnected slot has no pad info", ok: goneInfo == "none",
+                          why: "it is `${goneInfo}`");
+
+                    Gamepad rest = Gamepad.neutral();
+                    systemPad(slot: 3, pad: rest, name: "a second pad", vendor: 0, product: 0, serial: "", id: "ID-3");
+                    a.pump();
+                    ignored = drained(w: a);
+                    Result<Window, WindowError> openedC = Window.openWith(title: "@kama/window pads C", width: 160,
+                                                                         height: 100, options: padWindow());
+                    match (give openedC) {
+                        case Ok(value: c): {
+                            c.pump();
+                            expectDrained(t: t, w: c, name: "a window opened while a pad is in sees it connect at its first pump",
+                                          want: "PadConnected 3");
+                            string noInfo = infoText(w: c, slot: 3);
+                            check(t: t, name: "a pad's info without a vendor reads 0, and without a serial reads empty",
+                                  ok: noInfo == "a second pad 0 0  ID-3", why: "it is `${noInfo}`");
+                        }
+                        case Err(error: e): {
+                            string why = e.message();
+                            t.verdict(name: "a window opened while a pad is in sees it connect at its first pump", why: why);
+                        }
+                    };
+                    winseam_pads_from_system(on: 1);
+                    b.pump();
+                    string back = drained(w: b);
+                    check(t: t, name: "back to the system, the test's slots are emptied",
+                          ok: back.contains(substring: "PadDisconnected 3"), why: "got `${back}`");
+                }
+            };
+        }
+    };
+}
+
+@compileFor(ARCH_WASM32)
+unsafe fn void replacedRead(ref Tally t) { }
+
+// The slot whose pad SDL names `name`, or -1.
+unsafe fn int32 slotNamed(const ref Window w, const ref string name) {
+    int32 slot = 0;
+    while (slot < Window::PadSlots) {
+        Optional<PadInfo> info = w.padInfo(slot: slot);
+        bool named = match (info) { case Some(value: i): i.name() == name; case None: false; };
+        if (named) { return slot; }
+        slot = slot + 1;
+    }
+    return -1;
+}
+
+// SDL's own path: a virtual pad SDL's joystick layer reads, mapped by SDL to the standard layout and read by the
+// package's backend like any other. Windows only, until WIN-12 vendors SDL for Linux and macOS.
+@compileFor(!ARCH_WASM32)
+unsafe fn void virtualPad(ref Tally t) {
+    if (windowtests_win32() != 1) { println(s: "skip SDL's virtual pad (SDL is vendored on Windows so far)"); return; }
+    int32 runningBefore = windowtests_sdl_running();
+    check(t: t, name: "SDL stops with the last system window", ok: runningBefore == 0,
+          why: "SDL is still up after every earlier window closed");
+    UnsafePtr sigintBefore = windowtests_sigint_handler();
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window SDL pad", width: 160, height: 100,
+                                                         options: padWindow());
+    UnsafePtr sigintAfter = windowtests_sigint_handler();
+    int32 runningAfter = windowtests_sdl_running();
+    check(t: t, name: "SDL starts with a system window, and leaves the program's Ctrl+C handler alone",
+          ok: runningAfter == 1 && sigintAfter == sigintBefore, why: "SDL running ${runningAfter}, or SIGINT's handler changed");
+    match (give opened) {
+        case Err(error: e): { string why = e.message(); t.verdict(name: "SDL's virtual pad: a window opens", why: why); }
+        case Ok(value: w): {
+            winseam_pads_from_system(on: 1);
+            w.pump();
+            string before = drained(w: w);
+            string name = "kama-window virtual pad";
+            uint32 id = windowtests_virtual_pad(name: name.cstr());
+            check(t: t, name: "SDL attaches a virtual pad once a system window is open", ok: id != 0,
+                  why: "SDL refused, or was not started");
+            if (id == 0) { return; }
+            w.pump();
+            int32 s = slotNamed(w: w, name: name);
+            string connected = drained(w: w);
+            check(t: t, name: "SDL's pad connects in a slot, named as SDL names it",
+                  ok: s >= 0 && connected.contains(substring: "PadConnected ${s}"), why: "slot ${s}, events `${connected}`");
+            if (s < 0) { windowtests_virtual_detach(id: id); return; }
+
+            int32 sdlSouth = 0;
+            int32 sdlBack = 4;
+            int32 sdlDpadLeft = 13;
+            int32 sdlLeftX = 0;
+            int32 sdlRightTrigger = 5;
+            windowtests_virtual_button(id: id, button: sdlSouth, down: 1);
+            windowtests_virtual_button(id: id, button: sdlBack, down: 1);
+            windowtests_virtual_button(id: id, button: sdlDpadLeft, down: 1);
+            windowtests_virtual_axis(id: id, axis: sdlRightTrigger, value: 32767);
+            windowtests_virtual_axis(id: id, axis: sdlLeftX, value: -32768);
+            w.pump();
+            string pressed = drained(w: w);
+            check(t: t, name: "SDL's buttons arrive in the standard layout: South, Back, DpadLeft, the right trigger",
+                  ok: pressed.contains(substring: "PadButtonDown ${s} 0") && pressed.contains(substring: "PadButtonDown ${s} 8")
+                      && pressed.contains(substring: "PadButtonDown ${s} 14") && pressed.contains(substring: "PadButtonDown ${s} 7"),
+                  why: "events `${pressed}`");
+            Gamepad g = w.pad(slot: s);
+            check(t: t, name: "SDL's trigger reads 0 to 1, and its stick -1 to 1",
+                  ok: g.value(button: PadButton::RightTrigger) == 1.0 && g.axis(axis: PadAxis::LeftX) == -1.0
+                      && g.axis(axis: PadAxis::RightX) == 0.0,
+                  why: "the trigger or a stick read otherwise");
+
+            windowtests_virtual_detach(id: id);
+            w.pump();
+            string gone = drained(w: w);
+            check(t: t, name: "SDL's pad detached releases its buttons, then disconnects",
+                  ok: gone.contains(substring: "PadButtonUp ${s} 0") && gone.contains(substring: "PadDisconnected ${s}"),
+                  why: "events `${gone}`");
+
+            // Slots: a new pad takes the lowest free, so one arriving after a pad left takes the slot it left.
+            string nameA = "kama-window pad A";
+            string nameB = "kama-window pad B";
+            string nameC = "kama-window pad C";
+            uint32 a = windowtests_virtual_pad(name: nameA.cstr());
+            w.pump();
+            uint32 b = windowtests_virtual_pad(name: nameB.cstr());
+            w.pump();
+            int32 sa = slotNamed(w: w, name: nameA);
+            int32 sb = slotNamed(w: w, name: nameB);
+            windowtests_virtual_detach(id: a);
+            w.pump();
+            uint32 c = windowtests_virtual_pad(name: nameC.cstr());
+            w.pump();
+            int32 sc = slotNamed(w: w, name: nameC);
+            int32 sbAfter = slotNamed(w: w, name: nameB);
+            string slotsNow = allNames(w: w);
+            check(t: t, name: "a new pad takes the lowest free slot: the one a pad just left, while the others keep theirs",
+                  ok: sa >= 0 && sb > sa && sc == sa && sbAfter == sb, why: "A ${sa}, B ${sb} then ${sbAfter}, C ${sc}; ids ${a} ${b} ${c}; slots ${slotsNow}");
+            windowtests_virtual_detach(id: b);
+            windowtests_virtual_detach(id: c);
+            w.pump();
+            string ignored = drained(w: w);
+        }
+    };
+}
+
+@compileFor(ARCH_WASM32)
+unsafe fn void virtualPad(ref Tally t) { }
+
+unsafe fn void systemPadCases(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip the system's pads (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    replacedRead(t: t);
+    virtualPad(t: t);
+    winseam_pads_from_system(on: 0);
+}
+
+// The run reads no real pad but where a case asks for one (decision 8): the system's read is replaced by an empty table
+// from the start, so no case's queue depends on what is plugged into the machine running it, and none rumbles one.
+unsafe fn void noSystemPads() { winseam_pads_from_system(on: 0); }
+
+// Every slot's pad name, for a failure's message: "slot=name; ...".
+unsafe fn string allNames(const ref Window w) {
+    string all = "";
+    int32 slot = 0;
+    while (slot < Window::PadSlots) {
+        Optional<PadInfo> info = w.padInfo(slot: slot);
+        match (info) {
+            case Some(value: i): { string n = i.name(); all = "${all}${slot}=${n}; "; }
+            case None: { }
+        };
+        slot = slot + 1;
+    }
+    return all;
+}

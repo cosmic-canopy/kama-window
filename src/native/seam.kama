@@ -5,7 +5,7 @@ export {
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_POINTER_MOVE, KIND_POINTER_DOWN, KIND_POINTER_UP, KIND_POINTER_CANCEL,
     KIND_POINTER_ENTER, KIND_POINTER_LEAVE, KIND_SCROLL, KIND_RESIZE, KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK,
     KIND_CLOSE_REQUESTED, KIND_DROPPED, KIND_PAD_CONNECTED, KIND_PAD_DISCONNECTED, KIND_PAD_DOWN, KIND_PAD_UP,
-    winseam_pad, PAD_SLOTS, PAD_BUTTONS, PAD_AXES, padSample, padRead, setPadsWhenUnfocused,
+    winseam_pad, PAD_SLOTS, PAD_BUTTONS, PAD_AXES, padSample, padRead, setPadsWhenUnfocused, padText, padNumber,
     openWindow, headlessWindow, closeWindow, holdWindow, releaseWindow, windowClosed, pumpWindow, nextEvent, postEvent,
     releaseHeldInput, windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
 };
@@ -92,6 +92,8 @@ extern fn void winseam_pad_post(UnsafePtr window, int32 slot, int32 connected, U
                                 UnsafeConstPtr<float32> axes);
 extern fn void winseam_pad_read(UnsafePtr window, int32 slot, UnsafePtr into);
 extern fn void winseam_set_pads_when_unfocused(UnsafePtr window, int32 on);
+extern fn int32 winseam_pad_text(UnsafePtr window, int32 slot, int32 which, UnsafePtr<uint8> into, int32 capacity);
+extern fn int32 winseam_pad_number(UnsafePtr window, int32 slot, int32 which);
 
 unsafe fn void padSample(UnsafePtr window, int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
                          UnsafeConstPtr<float32> axes) {
@@ -127,3 +129,9 @@ unsafe fn int32 nativeKind(UnsafePtr window) { return winseam_native_kind(window
 unsafe fn UnsafePtr nativeDisplay(UnsafePtr window) { return winseam_native_display(window: window); }
 unsafe fn UnsafePtr nativeWindow(UnsafePtr window) { return winseam_native_window(window: window); }
 unsafe fn int32 glfwKeyToHid(int32 glfwKey) { return winseam_glfw_key_to_hid(glfw_key: glfwKey); }
+unsafe fn int32 padText(UnsafePtr window, int32 slot, int32 which, UnsafePtr<uint8> into, int32 capacity) {
+    return winseam_pad_text(window: window, slot: slot, which: which, into: into, capacity: capacity);
+}
+unsafe fn int32 padNumber(UnsafePtr window, int32 slot, int32 which) {
+    return winseam_pad_number(window: window, slot: slot, which: which);
+}

@@ -8,7 +8,7 @@ import {
     window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::Pointer,
     window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
     keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
-    pointerCases, mouseAt, webWindow, webFinish, padCases,
+    pointerCases, mouseAt, webWindow, webFinish, padCases, systemPadCases, noSystemPads,
 };
 
 export { Tally, describe, summary };
@@ -251,6 +251,7 @@ unsafe fn void systemWindow(ref Tally t) {
 
 unsafe fn uint8 appMain() {
     Tally t = Tally.make();
+    noSystemPads();
     queueOrder(t: t);
     plainValues(t: t);
     queueDrops(t: t);
@@ -266,6 +267,7 @@ unsafe fn uint8 appMain() {
     if (focusCases(t: t)) {
         systemWindow(t: t);
         systemHandles(t: t);
+        systemPadCases(t: t);
     }
     return webFinish(t: give t);
 }

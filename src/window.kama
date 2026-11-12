@@ -28,7 +28,7 @@ import {
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::KIND_PAD_CONNECTED, window::native::KIND_PAD_DISCONNECTED, window::native::KIND_PAD_DOWN,
     window::native::KIND_PAD_UP, window::native::winseam_pad, window::native::padSample, window::native::padRead,
-    window::native::setPadsWhenUnfocused,
+    window::native::setPadsWhenUnfocused, window::native::padText, window::native::padNumber,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
     window::native::holdWindow, window::native::releaseWindow, window::native::windowClosed,
     window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::releaseHeldInput,
@@ -39,7 +39,7 @@ import {
 
 export {
     Window, WindowOptions, WindowError, Event, Key, Pointer, PointerKind, PointerButton, ScrollUnit, Mods, CursorMode,
-    Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis,
+    Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis, PadInfo,
 };
 
 type enum WindowError implements Error {
@@ -116,6 +116,34 @@ type value Gamepad {
     // `button` at `value` of its travel, 0 to 1.
     public fn void setValue(PadButton button, float32 value) { this.buttons[cast<isize>(button)] = value; }
     public fn void setAxis(PadAxis axis, float32 value) { this.axes[cast<isize>(axis)] = value; }
+}
+
+// What the system says of the pad in a slot (`Window.padInfo`): its name; its USB vendor and product, 0 where the system
+// gives none; its serial, empty where it has none; and the system's own name for the device, which on Windows'
+// GameInput held for each pad across every replug and run (WIN-4's measurements). Which player a returning pad belongs
+// to is the consumer's (decision 4).
+type resource PadInfo {
+    string padName;
+    uint16 vendorId;
+    uint16 productId;
+    string serialNumber;
+    string deviceId;
+
+    friend Window::padInfo[made];
+
+    ctor made(string name, uint16 vendor, uint16 product, string serial, string id) {
+        this.padName = give name;
+        this.vendorId = vendor;
+        this.productId = product;
+        this.serialNumber = give serial;
+        this.deviceId = give id;
+    }
+
+    public const fn string name() { return copy this.padName; }
+    public const fn uint16 vendor() { return this.vendorId; }
+    public const fn uint16 product() { return this.productId; }
+    public const fn string serial() { return copy this.serialNumber; }
+    public const fn string id() { return copy this.deviceId; }
 }
 
 // One pointer as an event saw it: a W3C PointerEvent's fields, named as the DOM names them. The mouse is pointer 1;
@@ -292,6 +320,20 @@ unsafe fn PointerButton buttonOf(int32 n) {
     return match (b) {
         case Some(value: v): v;
         case None: PointerButton::Left;
+    };
+}
+
+// The pad info text `which` (0 the name, 1 the serial, 2 the id) of `slot`; "" when there is none.
+unsafe fn string padString(UnsafePtr window, int32 slot, int32 which) {
+    InlineArray<uint8>#(256) buffer = [0; 256];
+    int32 n = padText(window: window, slot: slot, which: which, into: addr(of: buffer[0]), capacity: 256);
+    DynamicArray<uint8> bytes = DynamicArray.empty();
+    isize i = 0;
+    while (i < cast<isize>(n)) { bytes.add(item: buffer[i]); i = i + 1; }
+    Result<string, Utf8Error> r = decode(bytes: bytes.view());
+    return match (give r) {
+        case Ok(value: t): give t;
+        case Err(error: e): "";
     };
 }
 
@@ -531,6 +573,20 @@ type resource Window {
         // By its parts: kama cannot yet write into an extern value's array (KAMA_GAPS.md).
         padSample(window: this.seam, slot: slot, connected: connected, buttons: addr(of: pad.buttons[0]),
                   axes: addr(of: pad.axes[0]));
+    }
+
+    // What the system says of the pad in `slot`, while the window knows a pad there (from its `PadConnected` to its
+    // `PadDisconnected`); None for an empty slot, and always for a headless window, which has no system behind it.
+    public unsafe const fn Optional<PadInfo> padInfo(int32 slot) {
+        if (this.seam == null) { return Optional::None; }
+        int32 vendor = padNumber(window: this.seam, slot: slot, which: 0);
+        if (vendor < 0) { return Optional::None; }
+        int32 product = padNumber(window: this.seam, slot: slot, which: 1);
+        string name = padString(window: this.seam, slot: slot, which: 0);
+        string serial = padString(window: this.seam, slot: slot, which: 1);
+        string id = padString(window: this.seam, slot: slot, which: 2);
+        return Optional::Some(value: PadInfo.made(name: give name, vendor: cast<uint16>(vendor),
+                                                product: cast<uint16>(product), serial: give serial, id: give id));
     }
 
     // Whether the window reads its pads while it is unfocused (WindowOptions.padsWhenUnfocused). Turned off while

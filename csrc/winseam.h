@@ -142,6 +142,25 @@ void winseam_pad_read(winseam_window *window, int32_t slot, winseam_pad *into);
 // hold is released at once.
 void winseam_set_pads_when_unfocused(winseam_window *window, int32_t on);
 
+// The system's pads (WIN-4, decision 1). Every pump of a system window reads them once (natively SDL3, on Windows so far;
+// on the web the Gamepad API) into one process-wide table, and hands each slot's sample to every open system window,
+// as `glfwPollEvents` takes every GLFW window's events. A new pad takes the lowest free slot and keeps it while it stays.
+// A headless window has none.
+//
+// A test or a replay replaces the system's read (decision 8): `winseam_pads_from_system(0)` stops reading the system, and
+// `winseam_system_pad` sets a slot as the system would (WINSEAM_PAD_BUTTONS values at `buttons`, WINSEAM_PAD_AXES at
+// `axes`; `vendor` and `product` 0 when unknown, `serial` and `id` "" when there are none). `winseam_pads_from_system(1)`
+// reads the system again, the table emptied first.
+void winseam_pads_from_system(int32_t on);
+void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, const float *axes, const char *name,
+                        int32_t vendor, int32_t product, const char *serial, const char *id);
+// What the system says of the pad in `slot`, as `window` knows it: its name (`which` 0), its serial (1) or its id (2), the
+// system's own name for the device, copied into `into` (at most `capacity` bytes, UTF-8, not terminated), the length
+// returned; its USB vendor (`which` 0) or product (1), 0 when the system gives none. -1 when the window knows no pad
+// there, or is headless.
+int32_t winseam_pad_text(winseam_window *window, int32_t slot, int32_t which, uint8_t *into, int32_t capacity);
+int32_t winseam_pad_number(winseam_window *window, int32_t slot, int32_t which);
+
 void winseam_size(winseam_window *window, int32_t *width, int32_t *height);
 void winseam_framebuffer_size(winseam_window *window, int32_t *width, int32_t *height);
 float winseam_scale(winseam_window *window);

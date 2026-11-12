@@ -62,7 +62,8 @@ struct winseam_window {
     pad_view pads[WINSEAM_PADS];
     int32_t focused;         // the window has the focus, as its last Focus record said (a headless window starts with it)
     int32_t pads_unfocused;  // pads are read while the window is unfocused
-    char *selector;          // on the web, the canvas's selector, which the native handle points at; NULL otherwise
+    struct winseam_window *next_open;   // the open system windows, which the system's pads reach, newest first
+    char *selector;         // on the web, the canvas's selector, which the native handle points at; NULL otherwise
     int32_t canvas;          // on the web, the JS library's index for the window
 #ifndef __EMSCRIPTEN__
     GLFWwindow *glfw;
@@ -524,12 +525,218 @@ void winseam_framebuffer_size(winseam_window *w, int32_t *width, int32_t *height
 }
 float winseam_scale(winseam_window *w) { return w->scale; }
 
+// ---- the system's pads (WIN-4, decision 1), on every leg ---------------------------------------------------------------
+
+// The system's pads, one process-wide table: each pump of a system window reads the system into it and hands every
+// slot's sample to every open system window. What the system says of each pad comes with it.
+typedef struct system_pad {
+    winseam_pad sample;
+    char name[128];
+    char serial[64];
+    char id[128];
+    int32_t vendor;
+    int32_t product;
+} system_pad;
+
+static system_pad g_system[WINSEAM_PADS];
+static int32_t g_from_system = 1;          // the system fills the table; 0 while a test or a replay does (decision 8)
+static winseam_window *g_open = NULL;      // the open system windows
+
+static void open_add(winseam_window *w) { w->next_open = g_open; g_open = w; }
+
+static void open_remove(winseam_window *w) {
+    for (winseam_window **p = &g_open; *p != NULL; p = &(*p)->next_open) {
+        if (*p == w) { *p = w->next_open; w->next_open = NULL; return; }
+    }
+}
+
+static void copy_string(char *dst, size_t capacity, const char *src) {
+    if (src == NULL) src = "";
+    size_t n = strlen(src);
+    if (n >= capacity) n = capacity - 1;
+    memcpy(dst, src, n);
+    dst[n] = 0;
+}
+
+static void system_slot(int32_t slot, const winseam_pad *sample, const char *name, int32_t vendor, int32_t product,
+                        const char *serial, const char *id) {
+    system_pad *p = &g_system[slot];
+    p->sample = *sample;
+    copy_string(p->name, sizeof p->name, name);
+    copy_string(p->serial, sizeof p->serial, serial);
+    copy_string(p->id, sizeof p->id, id);
+    p->vendor = vendor;
+    p->product = product;
+}
+
+// Every slot's sample to every open system window.
+static void deliver_system_pads(void) {
+    for (winseam_window *w = g_open; w != NULL; w = w->next_open) {
+        for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) pad_take(w, slot, &g_system[slot].sample);
+    }
+}
+
+void winseam_pads_from_system(int32_t on) {
+    g_from_system = on ? 1 : 0;
+    if (on) memset(g_system, 0, sizeof g_system);
+}
+
+void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, const float *axes, const char *name,
+                        int32_t vendor, int32_t product, const char *serial, const char *id) {
+    if (!slot_ok(slot)) return;
+    winseam_pad s;
+    memset(&s, 0, sizeof s);
+    if (connected) {
+        s.connected = 1;
+        memcpy(s.buttons, buttons, sizeof s.buttons);
+        memcpy(s.axes, axes, sizeof s.axes);
+        system_slot(slot, &s, name, vendor, product, serial, id);
+    } else {
+        system_slot(slot, &s, "", 0, 0, "", "");
+    }
+}
+
+// The system's word on the pad in `slot`, when `w` is a system window that knows a pad there.
+static const system_pad *info_of(winseam_window *w, int32_t slot) {
+    if (!slot_ok(slot) || winseam_headless_p(w) || !w->pads[slot].known) return NULL;
+    return &g_system[slot];
+}
+
+int32_t winseam_pad_text(winseam_window *w, int32_t slot, int32_t which, uint8_t *into, int32_t capacity) {
+    const system_pad *p = info_of(w, slot);
+    if (p == NULL) return -1;
+    const char *s = which == 0 ? p->name : which == 1 ? p->serial : p->id;
+    size_t n = strlen(s);
+    if ((int64_t)n > (int64_t)capacity) n = (size_t)capacity;
+    memcpy(into, s, n);
+    return (int32_t)n;
+}
+
+int32_t winseam_pad_number(winseam_window *w, int32_t slot, int32_t which) {
+    const system_pad *p = info_of(w, slot);
+    if (p == NULL) return -1;
+    return which == 0 ? p->vendor : p->product;
+}
+
 #ifndef __EMSCRIPTEN__
 // ---- natively: GLFW ------------------------------------------------------------------------------------------------
 
 // glfwInit and glfwTerminate are process-wide, and terminate destroys every window: counted, so the last window's
 // close is the one that terminates.
 static int32_t g_glfw_users = 0;
+
+#if defined(_WIN32)
+// ---- natively, the system's pads: SDL3's gamepad subsystem, alone, beside GLFW's windows (WIN-4, decision 1) ----------
+//
+// SDL starts with the first system window and stops with the last, as GLFW does. No SDL window exists, so SDL's own
+// background gate is inert, and the window decides what an unfocused pad reads (decision 5). On Windows SDL reads
+// GameInput where Microsoft's runtime is present, and XInput where it is not (decision 9).
+#include <SDL3/SDL.h>
+
+extern int winseam_gameinput_usable(void);   // csrc/winseam_gameinput.cpp: SDL's own test
+
+static int g_sdl = 0;
+static SDL_Gamepad *g_sdl_pads[WINSEAM_PADS];   // each slot's pad, as SDL opened it
+
+static void sdl_start(void) {
+    if (g_sdl) return;
+    SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");              // a pad library never takes the program's Ctrl+C
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1"); // the window decides what an unfocused pad reads
+    if (winseam_gameinput_usable()) {
+        SDL_SetHint(SDL_HINT_JOYSTICK_GAMEINPUT, "1");
+        // Stopgap (WIN-23): with GameInput and XInput both on, SDL 3.4 adds a replugged pad twice, so XInput is turned
+        // off while GameInput is usable, as SDL's main branch does inside SDL.
+        SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "0");
+    }
+    g_sdl = SDL_Init(SDL_INIT_GAMEPAD) ? 1 : 0;
+}
+
+static void sdl_stop(void) {
+    if (!g_sdl) return;
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        if (g_sdl_pads[slot] != NULL) { SDL_CloseGamepad(g_sdl_pads[slot]); g_sdl_pads[slot] = NULL; }
+    }
+    if (g_from_system) memset(g_system, 0, sizeof g_system);
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    g_sdl = 0;
+}
+
+static void sdl_add(SDL_JoystickID id) {
+    int32_t free_slot = -1;
+    for (int32_t slot = WINSEAM_PADS - 1; slot >= 0; slot--) {
+        if (g_sdl_pads[slot] == NULL) free_slot = slot;
+        else if (SDL_GetGamepadID(g_sdl_pads[slot]) == id) return;
+    }
+    if (free_slot < 0) return;
+    SDL_Gamepad *g = SDL_OpenGamepad(id);
+    if (g == NULL) return;
+    g_sdl_pads[free_slot] = g;
+    winseam_pad s;
+    memset(&s, 0, sizeof s);
+    s.connected = 1;
+    system_slot(free_slot, &s, SDL_GetGamepadName(g), SDL_GetGamepadVendor(g), SDL_GetGamepadProduct(g),
+                SDL_GetGamepadSerial(g), SDL_GetGamepadPath(g));
+}
+
+static void sdl_remove(SDL_JoystickID id) {
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        if (g_sdl_pads[slot] == NULL || SDL_GetGamepadID(g_sdl_pads[slot]) != id) continue;
+        SDL_CloseGamepad(g_sdl_pads[slot]);
+        g_sdl_pads[slot] = NULL;
+        memset(&g_system[slot], 0, sizeof g_system[slot]);
+    }
+}
+
+// SDL's -32768 to 32767, as -1 to 1.
+static float sdl_axis(Sint16 v) {
+    float f = (float)v / 32767.0f;
+    return f < -1.0f ? -1.0f : f;
+}
+
+// The W3C's standard button order, as SDL names them; the triggers are SDL's axes.
+static const SDL_GamepadButton k_sdl_buttons[WINSEAM_PAD_BUTTONS] = {
+    SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH,
+    SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_INVALID,
+    SDL_GAMEPAD_BUTTON_INVALID, SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_START, SDL_GAMEPAD_BUTTON_LEFT_STICK,
+    SDL_GAMEPAD_BUTTON_RIGHT_STICK, SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+    SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SDL_GAMEPAD_BUTTON_GUIDE,
+};
+
+static void sdl_sample(SDL_Gamepad *g, winseam_pad *s) {
+    memset(s, 0, sizeof *s);
+    s->connected = 1;
+    for (int32_t b = 0; b < WINSEAM_PAD_BUTTONS; b++) {
+        if (k_sdl_buttons[b] == SDL_GAMEPAD_BUTTON_INVALID) continue;
+        s->buttons[b] = SDL_GetGamepadButton(g, k_sdl_buttons[b]) ? 1.0f : 0.0f;
+    }
+    float lt = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFT_TRIGGER));
+    float rt = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER));
+    s->buttons[6] = lt < 0.0f ? 0.0f : lt;
+    s->buttons[7] = rt < 0.0f ? 0.0f : rt;
+    s->axes[0] = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTX));
+    s->axes[1] = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_LEFTY));
+    s->axes[2] = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTX));
+    s->axes[3] = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY));
+}
+
+// SDL's arrivals and removals, then each pad's state, into the table.
+static void read_system_pads(void) {
+    if (!g_sdl || !g_from_system) return;
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_EVENT_GAMEPAD_ADDED) sdl_add(e.gdevice.which);
+        else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) sdl_remove(e.gdevice.which);
+    }
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        if (g_sdl_pads[slot] != NULL) sdl_sample(g_sdl_pads[slot], &g_system[slot].sample);
+    }
+}
+#else
+// Linux and macOS: their SDL comes with WIN-12, each configured on its own system. Until then, no system pads.
+static void sdl_start(void) { }
+static void sdl_stop(void) { }
+static void read_system_pads(void) { }
+#endif
 
 static winseam_window *of(GLFWwindow *g) { return (winseam_window *)glfwGetWindowUserPointer(g); }
 
@@ -720,12 +927,13 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
         *why_length = copy_text(description, why, capacity);
         return NULL;
     }
+    if (g_glfw_users == 0) sdl_start();
     g_glfw_users += 1;
     winseam_window *w = new_record();
     if (w == NULL) {
         *why_length = copy_text("out of memory", why, capacity);
         g_glfw_users -= 1;
-        if (g_glfw_users == 0) glfwTerminate();
+        if (g_glfw_users == 0) { sdl_stop(); glfwTerminate(); }
         return NULL;
     }
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -741,7 +949,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
         *why_length = copy_text(description, why, capacity);
         free_record(w);
         g_glfw_users -= 1;
-        if (g_glfw_users == 0) glfwTerminate();
+        if (g_glfw_users == 0) { sdl_stop(); glfwTerminate(); }
         return NULL;
     }
     glfwSetWindowUserPointer(w->glfw, w);
@@ -765,6 +973,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
     w->fb_width = fw; w->fb_height = fh;
     w->scale = sx;
     w->focused = glfwGetWindowAttrib(w->glfw, GLFW_FOCUSED) ? 1 : 0;
+    open_add(w);
     return w;
 }
 
@@ -772,6 +981,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
 // valid for whoever still holds the record (a GPU surface on it: a configure on a destroyed window aborts wgpu-native).
 // The callbacks go first, so the focus the hide takes away reaches no one.
 static void system_close(winseam_window *w) {
+    open_remove(w);
     if (w->glfw == NULL) return;
     glfwSetKeyCallback(w->glfw, NULL);
     glfwSetCharCallback(w->glfw, NULL);
@@ -793,11 +1003,14 @@ static void system_destroy(winseam_window *w) {
     if (w->glfw == NULL) return;
     glfwDestroyWindow(w->glfw);
     g_glfw_users -= 1;
-    if (g_glfw_users == 0) glfwTerminate();
+    if (g_glfw_users == 0) { sdl_stop(); glfwTerminate(); }
 }
 
 void winseam_pump(winseam_window *w) {
-    if (w->glfw != NULL) glfwPollEvents();
+    if (w->glfw == NULL) return;
+    glfwPollEvents();
+    read_system_pads();
+    deliver_system_pads();
 }
 
 void winseam_set_cursor(winseam_window *w, int32_t mode) {
@@ -905,6 +1118,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
     w->selector = selector;
     w->canvas = index;
     w->focused = focused ? 1 : 0;   // the canvas was focused as it opened, or left until the user clicks it
+    open_add(w);
     w->width = sizes[0]; w->height = sizes[1];
     w->fb_width = sizes[2]; w->fb_height = sizes[3];
     w->scale = scale;
@@ -914,6 +1128,7 @@ winseam_window *winseam_open(const char *title, int32_t width, int32_t height, i
 // Closed as the user sees it: the canvas's listeners go, and what the window set on it is given back. The selector the
 // native handle points at stays until the record's last holder goes.
 static void system_close(winseam_window *w) {
+    open_remove(w);
     if (w->selector != NULL) winseam_web_close(w->canvas);
 }
 
@@ -955,6 +1170,7 @@ void winseam_pump(winseam_window *w) {
     winseam_event e;
     winseam_window *target;
     while ((target = winseam_web_pull(&e)) != NULL) web_take(target, &e);
+    deliver_system_pads();
 }
 
 // On a canvas, the browser says when a lock takes and when it goes (decision 7): a lock is asked for at the next

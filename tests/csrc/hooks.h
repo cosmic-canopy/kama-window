@@ -33,6 +33,19 @@ int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height);
 // 1 when the C string at `p` is `s`.
 int32_t windowtests_cstr_is(const void *p, const char *s);
 
+// A pad that SDL's own joystick layer reads, with no device: an SDL virtual gamepad named `name`, standard layout, for
+// the package's SDL backend to find (WIN-4, decision 8). It needs SDL started, which the package does as its first
+// system window opens. Its id, or 0 when SDL refused or is not here (off Windows, until WIN-12). Buttons and axes in
+// SDL's own numbering (SDL_GamepadButton, SDL_GamepadAxis); an axis -32768 to 32767, a trigger 0 to 32767.
+uint32_t windowtests_virtual_pad(const char *name);
+int32_t windowtests_virtual_button(uint32_t id, int32_t button, int32_t down);
+int32_t windowtests_virtual_axis(uint32_t id, int32_t axis, int32_t value);
+void windowtests_virtual_detach(uint32_t id);
+// The process's SIGINT handler as it stands, left in place: what a library that took the program's Ctrl+C would change.
+void *windowtests_sigint_handler(void);
+// 1 while SDL's gamepad subsystem is up, 0 when it is not; -1 off Windows.
+int32_t windowtests_sdl_running(void);
+
 // On the web, the tests' own JS library (tests/js/windowtests.js): DOM events dispatched at the element a selector names,
 // answering 1 when the event's default was left to the page and 0 when a listener prevented it, and what the window
 // did to the element. Not defined natively.
