@@ -610,8 +610,18 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    **Applied from `AGENTS.package.md`, not asked:** SDL3 is vendored, not linked, since MSYS2's is built without GameInput
    and the rule is a vendored C library. `tools/vendor-sdl.sh` pins an SDL 3.4 release and Microsoft's GameInput header by
    hash, and kama compiles the gamepad subset on every native target, with SDL's zlib notice and the header's MIT notice
-   beside it. Whether GameInput's device id follows a pad to another USB port was not measured in the building: it
-   needs a pad moved between ports by hand, at the next session with pads.
+   beside it.
+
+   **Measured after the building, with the owner's pads** (kyoten's sixteenth session, 2026-11-12; its
+   `.scratch/win4-gamepads/FINDINGS.md`, runs 8 and 9):
+   - **GameInput's device id follows a pad to another USB port:** the 360 pad, moved between two USB-A ports, kept the id
+     it has had in every run. Two pads of the same model were not tried.
+   - **A pad's labels follow the mode its firmware chose, not what is printed on it:** the 8BitDo Ultimate (Switch
+     edition) is read by place correctly in Xbox mode, but SDL labels its top button Y and its right button B, where the
+     pad's print says X and A. Only its 2.6 s as a Switch Pro pad reported Nintendo's labels. Decision 3's labels for
+     prompts (with WIN-17's) cannot come from SDL alone for such a pad; its vendor and product are the only hint.
+   - **The guide button may never arrive:** with Steam running, Steam took the Home press and came forward, and no run
+     logged a guide press. A program cannot count on receiving it.
 
    **Built, in five commits, test-first, each part's mutations caught or explained:**
    - **The ring** (part A): each window keeps its own view of each of 16 slots; a sample, the system's or a post's, is
