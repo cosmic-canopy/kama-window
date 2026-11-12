@@ -262,7 +262,8 @@
     { "path": "third_party/sdl/src/video/SDL_yuv.c", "compileFor": ["OS_WINDOWS"] },
     { "path": "third_party/sdl/src/video/yuv2rgb/yuv_rgb_lsx.c", "compileFor": ["OS_WINDOWS"] },
     { "path": "third_party/sdl/src/video/yuv2rgb/yuv_rgb_sse.c", "compileFor": ["OS_WINDOWS"] },
-    { "path": "third_party/sdl/src/video/yuv2rgb/yuv_rgb_std.c", "compileFor": ["OS_WINDOWS"] }
+    { "path": "third_party/sdl/src/video/yuv2rgb/yuv_rgb_std.c", "compileFor": ["OS_WINDOWS"] },
+    { "path": "third_party/sdl-db/gamecontrollerdb.c", "compileFor": ["OS_WINDOWS"] }
   ],
   "jsLibraries": ["js/winseam.js"],
   "ldflags": [

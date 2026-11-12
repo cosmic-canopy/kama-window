@@ -93,6 +93,48 @@ uint32_t windowtests_virtual_pad(const char *name, int32_t trigger_motors) {
     return 0;
 }
 
+uint32_t windowtests_virtual_joystick(const char *name, int32_t buttons, int32_t axes, int32_t hats) {
+    if (!SDL_WasInit(SDL_INIT_GAMEPAD)) return 0;
+    for (int i = 0; i < VIRTUAL_PADS; i++) {
+        if (g_virtual[i].joystick != NULL) continue;
+        SDL_VirtualJoystickDesc desc;
+        SDL_INIT_INTERFACE(&desc);
+        desc.type = SDL_JOYSTICK_TYPE_UNKNOWN;
+        desc.nbuttons = (Uint16)buttons;
+        desc.naxes = (Uint16)axes;
+        desc.nhats = (Uint16)hats;
+        desc.name = name;
+        desc.vendor_id = 0x1209;
+        desc.product_id = g_virtual_product++;
+        SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+        if (id == 0) return 0;
+        g_virtual[i].joystick = SDL_OpenJoystick(id);
+        if (g_virtual[i].joystick == NULL) { SDL_DetachVirtualJoystick(id); return 0; }
+        g_virtual[i].id = id;
+        g_virtual[i].rumbles = 0;
+        return (uint32_t)id;
+    }
+    return 0;
+}
+
+int32_t windowtests_virtual_hat(uint32_t id, int32_t hat, int32_t value) {
+    SDL_Joystick *j = virtual_of(id);
+    return j != NULL && SDL_SetJoystickVirtualHat(j, hat, (Uint8)value) ? 1 : 0;
+}
+
+int32_t windowtests_virtual_guid(uint32_t id, char *into, int32_t capacity) {
+    if (capacity < 33 || virtual_of(id) == NULL) return 0;
+    SDL_GUIDToString(SDL_GetJoystickGUIDForID((SDL_JoystickID)id), into, capacity);
+    return (int32_t)strlen(into);
+}
+
+int32_t windowtests_mapping_known(const char *guid) {
+    char *mapping = SDL_GetGamepadMappingForGUID(SDL_StringToGUID(guid));
+    if (mapping == NULL) return 0;
+    SDL_free(mapping);
+    return 1;
+}
+
 int32_t windowtests_virtual_button(uint32_t id, int32_t button, int32_t down) {
     SDL_Joystick *j = virtual_of(id);
     return j != NULL && SDL_SetJoystickVirtualButton(j, button, down != 0) ? 1 : 0;
@@ -137,6 +179,12 @@ int32_t windowtests_virtual_button(uint32_t id, int32_t button, int32_t down) { 
 int32_t windowtests_virtual_axis(uint32_t id, int32_t axis, int32_t value) { (void)id; (void)axis; (void)value; return 0; }
 void windowtests_virtual_detach(uint32_t id) { (void)id; }
 int32_t windowtests_sdl_running(void) { return -1; }
+uint32_t windowtests_virtual_joystick(const char *name, int32_t buttons, int32_t axes, int32_t hats) {
+    (void)name; (void)buttons; (void)axes; (void)hats; return 0;
+}
+int32_t windowtests_virtual_hat(uint32_t id, int32_t hat, int32_t value) { (void)id; (void)hat; (void)value; return 0; }
+int32_t windowtests_virtual_guid(uint32_t id, char *into, int32_t capacity) { (void)id; (void)into; (void)capacity; return 0; }
+int32_t windowtests_mapping_known(const char *guid) { (void)guid; return -1; }
 int32_t windowtests_virtual_rumbled(uint32_t id, int32_t *low, int32_t *high, int32_t *left, int32_t *right) {
     (void)id; (void)low; (void)high; (void)left; (void)right; return -1;
 }

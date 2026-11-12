@@ -12,7 +12,7 @@ import {
     core::env::envOr,
     Tally, describe, expectDrained, mouseAt, quietly,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Key, window::PointerButton,
-    window::Gamepad, window::PadButton, window::PadAxis,
+    window::Gamepad, window::PadButton, window::PadAxis, window::PadRaw,
 };
 export { padCases };
 
@@ -375,4 +375,21 @@ unsafe fn void padCases(ref Tally t) {
     slots(t: t);
     fullRing(t: t);
     systemWindowPads(t: t);
+    rawCounts(t: t);
+}
+
+// A raw view answers only for the controls it counts: a value past its counts reads at rest, whatever the arrays hold.
+unsafe fn void rawCounts(ref Tally t) {
+    PadRaw r = PadRaw.none();
+    r.buttonCount = 2;
+    r.axisCount = 1;
+    r.hatCount = 1;
+    r.buttons[1] = 1;
+    r.buttons[5] = 1;
+    r.axes[3] = 0.5;
+    r.hats[2] = 4;
+    check(t: t, name: "a raw view answers only for the controls it counts",
+          ok: r.button(index: 1) && !r.button(index: 5) && r.axis(index: 3) == 0.0 && r.hat(index: 2) == 0
+              && !r.button(index: -1),
+          why: "a control past the counts read otherwise");
 }

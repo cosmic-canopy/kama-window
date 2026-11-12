@@ -8,7 +8,8 @@ import {
     core::env::envOr,
     Tally, drained, expectDrained, quietly,
     window::Window, window::WindowError, window::WindowOptions, window::Gamepad, window::PadButton, window::PadAxis,
-    window::PadInfo, window::NativeWindow,
+    window::PadInfo, window::NativeWindow, window::PadRaw,
+    std::collections::DynamicArray, std::encoding::utf8::decode, std::encoding::utf8::Utf8Error,
 };
 export { systemPadCases, noSystemPads };
 
@@ -30,6 +31,10 @@ extern fn int32 windowtests_sdl_running();
 extern fn int32 windowtests_virtual_rumbled(uint32 id, UnsafePtr<int32> low, UnsafePtr<int32> high, UnsafePtr<int32> left,
                                             UnsafePtr<int32> right);
 extern fn int32 windowtests_send_focus(UnsafePtr hwnd, int32 focused);
+extern fn uint32 windowtests_virtual_joystick(UnsafeConstPtr<cchar> name, int32 buttons, int32 axes, int32 hats);
+extern fn int32 windowtests_virtual_hat(uint32 id, int32 hat, int32 value);
+extern fn int32 windowtests_virtual_guid(uint32 id, UnsafePtr<uint8> into, int32 capacity);
+extern fn int32 windowtests_mapping_known(UnsafeConstPtr<cchar> guid);
 
 fn void check(ref Tally t, const ref string name, bool ok, const ref string why) {
     if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
@@ -251,6 +256,109 @@ unsafe fn void rumbleCases(ref Tally t) {
 @compileFor(ARCH_WASM32)
 unsafe fn void rumbleCases(ref Tally t) { }
 
+// A virtual pad's GUID as SDL writes it.
+unsafe fn string virtualGuid(uint32 id) {
+    InlineArray<uint8>#(64) buffer = [0; 64];
+    int32 n = windowtests_virtual_guid(id: id, into: addr(of: buffer[0]), capacity: 64);
+    DynamicArray<uint8> bytes = DynamicArray.empty();
+    isize i = 0;
+    while (i < cast<isize>(n)) { bytes.add(item: buffer[i]); i = i + 1; }
+    Result<string, Utf8Error> r = decode(bytes: bytes.view());
+    return match (give r) { case Ok(value: t): give t; case Err(error: e): ""; };
+}
+
+unsafe fn bool mapped(const ref Window w, int32 slot) {
+    Optional<PadInfo> info = w.padInfo(slot: slot);
+    return match (info) { case Some(value: i): i.mapped(); case None: false; };
+}
+
+// The mapping (decision 3): SDL's pad database ships with the package, a pad no mapping knows is read raw, and a
+// mapping added while the program runs maps it in place and is kept across SDL's restarts.
+@compileFor(!ARCH_WASM32)
+unsafe fn void mappingCases(ref Tally t) {
+    if (windowtests_win32() != 1) { println(s: "skip the pad mappings (SDL is vendored on Windows so far)"); return; }
+    string kept = "03000000ffff0000eeee000000000000";
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window mappings", width: 160, height: 100,
+                                                         options: padWindow());
+    match (give opened) {
+        case Err(error: e): { string why = e.message(); t.verdict(name: "mappings: a window opens", why: why); }
+        case Ok(value: w): {
+            winseam_pads_from_system(on: 1);
+            w.pump();
+            string ignored = drained(w: w);
+            string nes = "03000000000f00000100000000000000";
+            check(t: t, name: "SDL's pad database ships with the package: a pad SDL's own list lacks is mapped",
+                  ok: windowtests_mapping_known(guid: nes.cstr()) == 1, why: "SDL has no mapping for it");
+
+            string rawName = "kama-window raw pad";
+            uint32 j = windowtests_virtual_joystick(name: rawName.cstr(), buttons: 3, axes: 2, hats: 1);
+            w.pump();
+            int32 s = slotNamed(w: w, name: rawName);
+            string arrived = drained(w: w);
+            check(t: t, name: "a pad no mapping knows connects in a slot, and says it is not mapped",
+                  ok: j != 0 && s >= 0 && arrived.contains(substring: "PadConnected ${s}") && !mapped(w: w, slot: s),
+                  why: "slot ${s}, events `${arrived}`");
+            if (s < 0) { windowtests_virtual_detach(id: j); return; }
+            windowtests_virtual_button(id: j, button: 2, down: 1);
+            windowtests_virtual_axis(id: j, axis: 1, value: -32768);
+            windowtests_virtual_hat(id: j, hat: 0, value: 1);
+            w.pump();
+            string rawEvents = drained(w: w);
+            check(t: t, name: "a pad no mapping knows makes no button events: its buttons have no names",
+                  ok: !rawEvents.contains(substring: "PadButtonDown ${s}"), why: "events `${rawEvents}`");
+            PadRaw r = w.padRaw(slot: s);
+            check(t: t, name: "its raw view has its controls, numbered as the system numbers them",
+                  ok: r.buttonCount == 3 && r.axisCount == 2 && r.hatCount == 1 && r.button(index: 2) && !r.button(index: 0)
+                      && r.axis(index: 1) == -1.0 && r.axis(index: 0) == 0.0 && r.hat(index: 0) == 1,
+                  why: "${r.buttonCount} buttons, ${r.axisCount} axes, ${r.hatCount} hats, or a value read otherwise");
+            Gamepad still = w.pad(slot: s);
+            check(t: t, name: "its standard view stays at rest", ok: !still.pressed(button: PadButton::South)
+                  && still.axis(axis: PadAxis::LeftY) == 0.0, why: "it moved");
+            w.setPadsWhenUnfocused(on: false);
+            PadRaw closed = w.padRaw(slot: s);
+            check(t: t, name: "unfocused, with pads not read in the background, the raw view reads neutral but keeps its counts",
+                  ok: closed.buttonCount == 3 && !closed.button(index: 2) && closed.axis(index: 1) == 0.0 && closed.hat(index: 0) == 0,
+                  why: "it reads the pad");
+            w.setPadsWhenUnfocused(on: true);
+            w.pump();
+            ignored = drained(w: w);
+
+            string guid = virtualGuid(id: j);
+            int32 took = Window::addPadMappings(text: "${guid},kama remapped pad,a:b2,b:b0,leftx:a0,lefty:a1,platform:Windows,");
+            w.pump();
+            string remapped = drained(w: w);
+            int32 renamed = slotNamed(w: w, name: "kama remapped pad");
+            check(t: t, name: "a mapping added while the program runs maps the pad in place, in its slot",
+                  ok: took == 1 && renamed == s && mapped(w: w, slot: s)
+                      && remapped.contains(substring: "PadButtonDown ${s} 0") && !remapped.contains(substring: "PadConnected"),
+                  why: "took ${took}, slot ${renamed}, events `${remapped}`");
+            Gamepad now = w.pad(slot: s);
+            check(t: t, name: "the mapped pad reads its sticks through the mapping", ok: now.axis(axis: PadAxis::LeftY) == -1.0,
+                  why: "LeftY reads otherwise");
+            check(t: t, name: "text with no mapping in it adds none", ok: Window::addPadMappings(text: "not a mapping") == 0,
+                  why: "it added one");
+            int32 tookKept = Window::addPadMappings(text: "${kept},kama kept mapping,a:b0,platform:Windows,");
+            check(t: t, name: "a mapping for a pad not plugged in is taken", ok: tookKept == 1 && windowtests_mapping_known(guid: kept.cstr()) == 1,
+                  why: "took ${tookKept}");
+            windowtests_virtual_detach(id: j);
+            w.pump();
+            ignored = drained(w: w);
+        }
+    };
+    Result<Window, WindowError> again = Window.openWith(title: "@kama/window mappings again", width: 160, height: 100,
+                                                        options: padWindow());
+    match (give again) {
+        case Ok(value: w): {
+            check(t: t, name: "a mapping added while the program runs is kept when SDL restarts",
+                  ok: windowtests_mapping_known(guid: kept.cstr()) == 1, why: "SDL forgot it");
+        }
+        case Err(error: e): { string why = e.message(); t.verdict(name: "mappings: a window opens again", why: why); }
+    };
+}
+
+@compileFor(ARCH_WASM32)
+unsafe fn void mappingCases(ref Tally t) { }
+
 // The slot whose pad SDL names `name`, or -1.
 unsafe fn int32 slotNamed(const ref Window w, const ref string name) {
     int32 slot = 0;
@@ -339,6 +447,13 @@ unsafe fn void virtualPad(ref Tally t) {
                   ok: tookTriggers && asked == 2 && left == 32768 && right == 65535,
                   why: "took ${tookTriggers}, ${asked} asked, left ${left}, right ${right}");
 
+            string guid = virtualGuid(id: id);
+            int32 renamedTook = Window::addPadMappings(text: "${guid},kama renamed pad,a:b0,b:b1,platform:Windows,");
+            w.pump();
+            int32 renamed = slotNamed(w: w, name: "kama renamed pad");
+            check(t: t, name: "a mapping added for a mapped pad takes over, its name with it, in the same slot",
+                  ok: renamedTook == 1 && renamed == s, why: "took ${renamedTook}, slot ${renamed}");
+
             windowtests_virtual_detach(id: id);
             w.pump();
             string gone = drained(w: w);
@@ -386,6 +501,7 @@ unsafe fn void systemPadCases(ref Tally t) {
     winseam_pads_from_system(on: 0);
     rumbleCases(t: t);
     virtualPad(t: t);
+    mappingCases(t: t);
     winseam_pads_from_system(on: 0);
 }
 

@@ -543,6 +543,11 @@ typedef struct system_pad {
     int32_t vendor;
     int32_t product;
     int32_t caps;          // WINSEAM_PAD_RUMBLE, WINSEAM_PAD_TRIGGER_RUMBLE
+    int32_t mapped;        // a mapping knows it: its standard view is read; 0, read only raw
+    int32_t raw_counts[3]; // buttons, axes, hats, as the system numbers them
+    uint8_t raw_buttons[WINSEAM_PAD_RAW_BUTTONS];
+    float raw_axes[WINSEAM_PAD_RAW_AXES];
+    uint8_t raw_hats[WINSEAM_PAD_RAW_HATS];
     float rumble[4];       // a test's table: the last rumble asked for, strong, weak, left, right
     int32_t rumble_ms;
     int32_t rumbles;       // a test's table: how many were asked for since the slot was set
@@ -603,6 +608,7 @@ void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, c
         memcpy(s.buttons, buttons, sizeof s.buttons);
         memcpy(s.axes, axes, sizeof s.axes);
         system_slot(slot, &s, name, vendor, product, serial, id, caps);
+        g_system[slot].mapped = 1;
     } else {
         system_slot(slot, &s, "", 0, 0, "", "", 0);
     }
@@ -635,7 +641,22 @@ int32_t winseam_pad_text(winseam_window *w, int32_t slot, int32_t which, uint8_t
 int32_t winseam_pad_number(winseam_window *w, int32_t slot, int32_t which) {
     const system_pad *p = info_of(w, slot);
     if (p == NULL) return -1;
-    return which == 0 ? p->vendor : which == 1 ? p->product : p->caps;
+    return which == 0 ? p->vendor : which == 1 ? p->product : which == 2 ? p->caps : p->mapped;
+}
+
+int32_t winseam_pad_raw(winseam_window *w, int32_t slot, int32_t *counts, uint8_t *buttons, float *axes, uint8_t *hats) {
+    memset(counts, 0, 3 * sizeof *counts);
+    memset(buttons, 0, WINSEAM_PAD_RAW_BUTTONS);
+    memset(axes, 0, WINSEAM_PAD_RAW_AXES * sizeof *axes);
+    memset(hats, 0, WINSEAM_PAD_RAW_HATS);
+    const system_pad *p = info_of(w, slot);
+    if (p == NULL) return 0;
+    memcpy(counts, p->raw_counts, sizeof p->raw_counts);
+    if (!pads_open(w) || w->pads[slot].stale) return 1;
+    memcpy(buttons, p->raw_buttons, sizeof p->raw_buttons);
+    memcpy(axes, p->raw_axes, sizeof p->raw_axes);
+    memcpy(hats, p->raw_hats, sizeof p->raw_hats);
+    return 1;
 }
 
 static float unit(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
@@ -703,7 +724,25 @@ static int32_t g_glfw_users = 0;
 extern int winseam_gameinput_usable(void);   // csrc/winseam_gameinput.cpp: SDL's own test
 
 static int g_sdl = 0;
-static SDL_Gamepad *g_sdl_pads[WINSEAM_PADS];   // each slot's pad, as SDL opened it
+// Each slot's pad as SDL opened it: a gamepad, or, for a pad no mapping knows, its joystick alone (decision 3).
+static SDL_Gamepad *g_sdl_pads[WINSEAM_PADS];
+static SDL_Joystick *g_sdl_raw[WINSEAM_PADS];
+static SDL_JoystickID g_sdl_ids[WINSEAM_PADS];
+
+// SDL_GameControllerDB's Windows lines (third_party/sdl-db/gamecontrollerdb.c, written by tools/vendor-sdl.sh).
+extern const char winseam_gamecontrollerdb[];
+extern const size_t winseam_gamecontrollerdb_size;
+
+// The mappings a program added, kept so each start of SDL applies them again.
+static char *g_added = NULL;
+static size_t g_added_size = 0;
+
+static int32_t sdl_add_mappings(const char *text, size_t size) {
+    SDL_IOStream *io = SDL_IOFromConstMem(text, size);
+    if (io == NULL) return 0;
+    int n = SDL_AddGamepadMappingsFromIO(io, true);
+    return n < 0 ? 0 : (int32_t)n;
+}
 
 static void sdl_start(void) {
     if (g_sdl) return;
@@ -716,45 +755,109 @@ static void sdl_start(void) {
         SDL_SetHint(SDL_HINT_XINPUT_ENABLED, "0");
     }
     g_sdl = SDL_Init(SDL_INIT_GAMEPAD) ? 1 : 0;
+    if (!g_sdl) return;
+    sdl_add_mappings(winseam_gamecontrollerdb, winseam_gamecontrollerdb_size);
+    if (g_added != NULL) sdl_add_mappings(g_added, g_added_size);
+}
+
+int32_t winseam_add_pad_mappings(const char *text, int32_t length) {
+    if (length <= 0) return 0;
+    int32_t took = g_sdl ? sdl_add_mappings(text, (size_t)length) : 0;
+    if (g_sdl && took == 0) return 0;
+    char *grown = (char *)realloc(g_added, g_added_size + (size_t)length + 1);
+    if (grown == NULL) return took;
+    memcpy(grown + g_added_size, text, (size_t)length);
+    grown[g_added_size + (size_t)length] = '\n';
+    g_added = grown;
+    g_added_size += (size_t)length + 1;
+    return took;
+}
+
+static SDL_Joystick *sdl_joystick(int32_t slot) {
+    return g_sdl_pads[slot] != NULL ? SDL_GetGamepadJoystick(g_sdl_pads[slot]) : g_sdl_raw[slot];
+}
+
+static void sdl_close(int32_t slot) {
+    if (g_sdl_pads[slot] != NULL) SDL_CloseGamepad(g_sdl_pads[slot]);
+    if (g_sdl_raw[slot] != NULL) SDL_CloseJoystick(g_sdl_raw[slot]);
+    g_sdl_pads[slot] = NULL;
+    g_sdl_raw[slot] = NULL;
+    g_sdl_ids[slot] = 0;
 }
 
 static void sdl_stop(void) {
     if (!g_sdl) return;
-    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
-        if (g_sdl_pads[slot] != NULL) { SDL_CloseGamepad(g_sdl_pads[slot]); g_sdl_pads[slot] = NULL; }
-    }
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) sdl_close(slot);
     if (g_from_system) memset(g_system, 0, sizeof g_system);
     SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     g_sdl = 0;
 }
 
-static void sdl_add(SDL_JoystickID id) {
-    int32_t free_slot = -1;
-    for (int32_t slot = WINSEAM_PADS - 1; slot >= 0; slot--) {
-        if (g_sdl_pads[slot] == NULL) free_slot = slot;
-        else if (SDL_GetGamepadID(g_sdl_pads[slot]) == id) return;
+static int32_t sdl_slot_of(SDL_JoystickID id) {
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        if ((g_sdl_pads[slot] != NULL || g_sdl_raw[slot] != NULL) && g_sdl_ids[slot] == id) return slot;
     }
-    if (free_slot < 0) return;
-    SDL_Gamepad *g = SDL_OpenGamepad(id);
-    if (g == NULL) return;
-    g_sdl_pads[free_slot] = g;
+    return -1;
+}
+
+// A new pad takes the lowest free slot.
+static int32_t sdl_free_slot(void) {
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        if (g_sdl_pads[slot] == NULL && g_sdl_raw[slot] == NULL) return slot;
+    }
+    return -1;
+}
+
+// What SDL says of the slot's pad, into the table: through its mapping when it has one, else its joystick's own word.
+static void sdl_info(int32_t slot) {
+    SDL_Joystick *j = sdl_joystick(slot);
+    SDL_PropertiesID props = SDL_GetJoystickProperties(j);
+    int32_t caps = (SDL_GetBooleanProperty(props, SDL_PROP_JOYSTICK_CAP_RUMBLE_BOOLEAN, false) ? WINSEAM_PAD_RUMBLE : 0) |
+                   (SDL_GetBooleanProperty(props, SDL_PROP_JOYSTICK_CAP_TRIGGER_RUMBLE_BOOLEAN, false) ? WINSEAM_PAD_TRIGGER_RUMBLE : 0);
     winseam_pad s;
     memset(&s, 0, sizeof s);
     s.connected = 1;
-    SDL_PropertiesID props = SDL_GetGamepadProperties(g);
-    int32_t caps = (SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) ? WINSEAM_PAD_RUMBLE : 0) |
-                   (SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false) ? WINSEAM_PAD_TRIGGER_RUMBLE : 0);
-    system_slot(free_slot, &s, SDL_GetGamepadName(g), SDL_GetGamepadVendor(g), SDL_GetGamepadProduct(g),
-                SDL_GetGamepadSerial(g), SDL_GetGamepadPath(g), caps);
+    SDL_Gamepad *g = g_sdl_pads[slot];
+    system_slot(slot, &s, g != NULL ? SDL_GetGamepadName(g) : SDL_GetJoystickName(j), SDL_GetJoystickVendor(j),
+                SDL_GetJoystickProduct(j), SDL_GetJoystickSerial(j), SDL_GetJoystickPath(j), caps);
+    g_system[slot].mapped = g != NULL ? 1 : 0;
+}
+
+// A pad SDL maps: a new one takes the lowest free slot; one read raw until now is mapped in its slot.
+static void sdl_add(SDL_JoystickID id) {
+    int32_t slot = sdl_slot_of(id);
+    if (slot >= 0 && g_sdl_pads[slot] != NULL) return;
+    SDL_Gamepad *g = SDL_OpenGamepad(id);
+    if (g == NULL) return;
+    if (slot >= 0) {
+        SDL_CloseJoystick(g_sdl_raw[slot]);
+        g_sdl_raw[slot] = NULL;
+    } else {
+        slot = sdl_free_slot();
+        if (slot < 0) { SDL_CloseGamepad(g); return; }
+    }
+    g_sdl_pads[slot] = g;
+    g_sdl_ids[slot] = id;
+    sdl_info(slot);
+}
+
+// A pad no mapping knows: read raw, in the lowest free slot.
+static void sdl_add_raw(SDL_JoystickID id) {
+    if (SDL_IsGamepad(id) || sdl_slot_of(id) >= 0) return;
+    int32_t slot = sdl_free_slot();
+    if (slot < 0) return;
+    SDL_Joystick *j = SDL_OpenJoystick(id);
+    if (j == NULL) return;
+    g_sdl_raw[slot] = j;
+    g_sdl_ids[slot] = id;
+    sdl_info(slot);
 }
 
 static void sdl_remove(SDL_JoystickID id) {
-    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
-        if (g_sdl_pads[slot] == NULL || SDL_GetGamepadID(g_sdl_pads[slot]) != id) continue;
-        SDL_CloseGamepad(g_sdl_pads[slot]);
-        g_sdl_pads[slot] = NULL;
-        memset(&g_system[slot], 0, sizeof g_system[slot]);
-    }
+    int32_t slot = sdl_slot_of(id);
+    if (slot < 0) return;
+    sdl_close(slot);
+    memset(&g_system[slot], 0, sizeof g_system[slot]);
 }
 
 // SDL's -32768 to 32767, as -1 to 1.
@@ -775,6 +878,7 @@ static const SDL_GamepadButton k_sdl_buttons[WINSEAM_PAD_BUTTONS] = {
 static void sdl_sample(SDL_Gamepad *g, winseam_pad *s) {
     memset(s, 0, sizeof *s);
     s->connected = 1;
+    if (g == NULL) return;   // read only raw: the standard view stays at rest
     for (int32_t b = 0; b < WINSEAM_PAD_BUTTONS; b++) {
         if (k_sdl_buttons[b] == SDL_GAMEPAD_BUTTON_INVALID) continue;
         s->buttons[b] = SDL_GetGamepadButton(g, k_sdl_buttons[b]) ? 1.0f : 0.0f;
@@ -789,26 +893,48 @@ static void sdl_sample(SDL_Gamepad *g, winseam_pad *s) {
     s->axes[3] = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY));
 }
 
+// The joystick's own controls, as SDL numbers them.
+static void sdl_sample_raw(SDL_Joystick *j, system_pad *p) {
+    int32_t nb = SDL_GetNumJoystickButtons(j), na = SDL_GetNumJoystickAxes(j), nh = SDL_GetNumJoystickHats(j);
+    if (nb < 0) nb = 0;
+    if (na < 0) na = 0;
+    if (nh < 0) nh = 0;
+    if (nb > WINSEAM_PAD_RAW_BUTTONS) nb = WINSEAM_PAD_RAW_BUTTONS;
+    if (na > WINSEAM_PAD_RAW_AXES) na = WINSEAM_PAD_RAW_AXES;
+    if (nh > WINSEAM_PAD_RAW_HATS) nh = WINSEAM_PAD_RAW_HATS;
+    p->raw_counts[0] = nb; p->raw_counts[1] = na; p->raw_counts[2] = nh;
+    for (int32_t b = 0; b < nb; b++) p->raw_buttons[b] = SDL_GetJoystickButton(j, b) ? 1 : 0;
+    for (int32_t a = 0; a < na; a++) p->raw_axes[a] = sdl_axis(SDL_GetJoystickAxis(j, a));
+    for (int32_t h = 0; h < nh; h++) p->raw_hats[h] = SDL_GetJoystickHat(j, h);
+}
+
 // SDL's 0 to 65535, from 0 to 1.
 static Uint16 sdl_motor(float v) { return (Uint16)(v * 65535.0f + 0.5f); }
 
 static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
-    SDL_Gamepad *g = g_sdl_pads[slot];
-    if (g == NULL) return 0;
+    if (g_sdl_pads[slot] == NULL && g_sdl_raw[slot] == NULL) return 0;
+    SDL_Joystick *j = sdl_joystick(slot);
     Uint32 ms = (Uint32)milliseconds;
-    return triggers ? SDL_RumbleGamepadTriggers(g, sdl_motor(a), sdl_motor(b), ms) : SDL_RumbleGamepad(g, sdl_motor(a), sdl_motor(b), ms);
+    return triggers ? SDL_RumbleJoystickTriggers(j, sdl_motor(a), sdl_motor(b), ms) : SDL_RumbleJoystick(j, sdl_motor(a), sdl_motor(b), ms);
 }
 
-// SDL's arrivals and removals, then each pad's state, into the table.
+// SDL's arrivals, removals and remappings, then each pad's state, into the table.
 static void read_system_pads(void) {
     if (!g_sdl || !g_from_system) return;
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_EVENT_GAMEPAD_ADDED) sdl_add(e.gdevice.which);
-        else if (e.type == SDL_EVENT_GAMEPAD_REMOVED) sdl_remove(e.gdevice.which);
+        else if (e.type == SDL_EVENT_JOYSTICK_ADDED) sdl_add_raw(e.jdevice.which);
+        else if (e.type == SDL_EVENT_GAMEPAD_REMOVED || e.type == SDL_EVENT_JOYSTICK_REMOVED) sdl_remove(e.jdevice.which);
+        else if (e.type == SDL_EVENT_GAMEPAD_REMAPPED) {
+            int32_t slot = sdl_slot_of(e.gdevice.which);
+            if (slot >= 0) sdl_info(slot);
+        }
     }
     for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
-        if (g_sdl_pads[slot] != NULL) sdl_sample(g_sdl_pads[slot], &g_system[slot].sample);
+        if (g_sdl_pads[slot] == NULL && g_sdl_raw[slot] == NULL) continue;
+        sdl_sample(g_sdl_pads[slot], &g_system[slot].sample);
+        sdl_sample_raw(sdl_joystick(slot), &g_system[slot]);
     }
 }
 #else
@@ -820,6 +946,7 @@ static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, i
     (void)slot; (void)a; (void)b; (void)milliseconds; (void)triggers;
     return 0;
 }
+int32_t winseam_add_pad_mappings(const char *text, int32_t length) { (void)text; (void)length; return 0; }
 #endif
 
 static winseam_window *of(GLFWwindow *g) { return (winseam_window *)glfwGetWindowUserPointer(g); }
@@ -1268,6 +1395,9 @@ void winseam_set_cursor(winseam_window *w, int32_t mode) {
     }
     if ((mode == 2) != (was == 2)) push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0);
 }
+
+// The browser maps the page's pads.
+int32_t winseam_add_pad_mappings(const char *text, int32_t length) { (void)text; (void)length; return 0; }
 
 // A rumble on the page's pads: part C's (WIN-4); none yet.
 static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {

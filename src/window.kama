@@ -28,7 +28,8 @@ import {
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::KIND_PAD_CONNECTED, window::native::KIND_PAD_DISCONNECTED, window::native::KIND_PAD_DOWN,
     window::native::KIND_PAD_UP, window::native::winseam_pad, window::native::padSample, window::native::padRead,
-    window::native::setPadsWhenUnfocused, window::native::padText, window::native::padNumber, window::native::padRumble,
+    window::native::setPadsWhenUnfocused, window::native::padText, window::native::padNumber, window::native::padRumble, window::native::padRaw,
+    window::native::addPadMappings,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
     window::native::holdWindow, window::native::releaseWindow, window::native::windowClosed,
     window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::releaseHeldInput,
@@ -39,7 +40,7 @@ import {
 
 export {
     Window, WindowOptions, WindowError, Event, Key, Pointer, PointerKind, PointerButton, ScrollUnit, Mods, CursorMode,
-    Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis, PadInfo,
+    Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis, PadInfo, PadRaw,
 };
 
 type enum WindowError implements Error {
@@ -129,16 +130,18 @@ type resource PadInfo {
     string serialNumber;
     string deviceId;
     int32 caps;
+    bool mappedPad;
 
     friend Window::padInfo[made];
 
-    ctor made(string name, uint16 vendor, uint16 product, string serial, string id, int32 caps) {
+    ctor made(string name, uint16 vendor, uint16 product, string serial, string id, int32 caps, bool mapped) {
         this.padName = give name;
         this.vendorId = vendor;
         this.productId = product;
         this.serialNumber = give serial;
         this.deviceId = give id;
         this.caps = caps;
+        this.mappedPad = mapped;
     }
 
     public const fn string name() { return copy this.padName; }
@@ -150,6 +153,45 @@ type resource PadInfo {
     public const fn bool rumble() { return (this.caps & 1) != 0; }
     // A motor in each trigger: `Window.rumbleTriggers`.
     public const fn bool triggerRumble() { return (this.caps & 2) != 0; }
+    // A mapping knows it, so its standard view (`Window.pad`) is read; false for a pad read only raw (`Window.padRaw`).
+    public const fn bool mapped() { return this.mappedPad; }
+}
+
+// A pad as the system numbers its controls, before any mapping (WIN-4, decision 3): how many buttons, axes and hats it
+// has (at most 32, 8 and 4), each button pressed or not, each axis -1 to 1, each hat's bits (1 up, 2 right, 4 down,
+// 8 left). A pad no mapping knows (`PadInfo.mapped` false) has only this: its standard view stays at rest, its buttons
+// make no events, and a program can still offer it rebinding by these numbers, or give it a mapping
+// (`Window::addPadMappings`). Neutral while the window's pads read neutral, as the standard view is.
+type value PadRaw {
+    public int32 buttonCount;
+    public int32 axisCount;
+    public int32 hatCount;
+    public InlineArray<uint8>#(32) buttons;
+    public InlineArray<float32>#(8) axes;
+    public InlineArray<uint8>#(4) hats;
+
+    // A pad with no controls: what an empty slot reads.
+    public ctor none() {
+        this.buttonCount = 0;
+        this.axisCount = 0;
+        this.hatCount = 0;
+        this.buttons = [0; 32];
+        this.axes = [0.0; 8];
+        this.hats = [0; 4];
+    }
+
+    public const fn bool button(int32 index) {
+        if (index < 0 || index >= this.buttonCount) { return false; }
+        return this.buttons[cast<isize>(index)] != 0;
+    }
+    public const fn float32 axis(int32 index) {
+        if (index < 0 || index >= this.axisCount) { return 0.0; }
+        return this.axes[cast<isize>(index)];
+    }
+    public const fn uint8 hat(int32 index) {
+        if (index < 0 || index >= this.hatCount) { return 0; }
+        return this.hats[cast<isize>(index)];
+    }
 }
 
 // One pointer as an event saw it: a W3C PointerEvent's fields, named as the DOM names them. The mouse is pointer 1;
@@ -592,9 +634,33 @@ type resource Window {
         string serial = padString(window: this.seam, slot: slot, which: 1);
         string id = padString(window: this.seam, slot: slot, which: 2);
         int32 caps = padNumber(window: this.seam, slot: slot, which: 2);
+        bool mapped = padNumber(window: this.seam, slot: slot, which: 3) == 1;
         return Optional::Some(value: PadInfo.made(name: give name, vendor: cast<uint16>(vendor),
                                                 product: cast<uint16>(product), serial: give serial, id: give id,
-                                                caps: caps));
+                                                caps: caps, mapped: mapped));
+    }
+
+    // The pad in `slot` as the system numbers its controls (`PadRaw`), while the window knows a pad there; no controls
+    // for an empty slot and for a headless window.
+    public unsafe const fn PadRaw padRaw(int32 slot) {
+        PadRaw r = PadRaw.none();
+        if (this.seam == null) { return r; }
+        InlineArray<int32>#(3) counts = [0; 3];
+        int32 known = padRaw(window: this.seam, slot: slot, counts: addr(of: counts[0]), buttons: addr(of: r.buttons[0]),
+                             axes: addr(of: r.axes[0]), hats: addr(of: r.hats[0]));
+        if (known == 0) { return r; }
+        r.buttonCount = counts[0];
+        r.axisCount = counts[1];
+        r.hatCount = counts[2];
+        return r;
+    }
+
+    // Mappings for pads, in SDL's text format (SDL_GameControllerDB's), a mapping a line, for a pad the shipped
+    // database does not know (decision 3): kept, and applied now and each time the system's pads start, so a pad they
+    // name is mapped in its slot from then on. How many were taken now; 0 when no system window is open (they apply when
+    // one opens), and on the web, where the browser maps. Text with no mapping in it is not kept.
+    public static unsafe fn int32 addPadMappings(const ref string text) {
+        return addPadMappings(text: text.cstr(), length: cast<int32>(text.length()));
     }
 
     // Rumble on the pad in `slot` (WIN-4, decision 7): `strong` its low-frequency motor and `weak` its high-frequency

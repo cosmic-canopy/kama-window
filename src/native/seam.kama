@@ -5,7 +5,7 @@ export {
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_POINTER_MOVE, KIND_POINTER_DOWN, KIND_POINTER_UP, KIND_POINTER_CANCEL,
     KIND_POINTER_ENTER, KIND_POINTER_LEAVE, KIND_SCROLL, KIND_RESIZE, KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK,
     KIND_CLOSE_REQUESTED, KIND_DROPPED, KIND_PAD_CONNECTED, KIND_PAD_DISCONNECTED, KIND_PAD_DOWN, KIND_PAD_UP,
-    winseam_pad, PAD_SLOTS, PAD_BUTTONS, PAD_AXES, padSample, padRead, setPadsWhenUnfocused, padText, padNumber, padRumble,
+    winseam_pad, PAD_SLOTS, PAD_BUTTONS, PAD_AXES, padSample, padRead, setPadsWhenUnfocused, padText, padNumber, padRumble, padRaw, addPadMappings,
     openWindow, headlessWindow, closeWindow, holdWindow, releaseWindow, windowClosed, pumpWindow, nextEvent, postEvent,
     releaseHeldInput, windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
 };
@@ -96,6 +96,9 @@ extern fn int32 winseam_pad_text(UnsafePtr window, int32 slot, int32 which, Unsa
 extern fn int32 winseam_pad_number(UnsafePtr window, int32 slot, int32 which);
 extern fn int32 winseam_pad_rumble(UnsafePtr window, int32 slot, float32 strong, float32 weak, int32 milliseconds);
 extern fn int32 winseam_pad_rumble_triggers(UnsafePtr window, int32 slot, float32 left, float32 right, int32 milliseconds);
+extern fn int32 winseam_pad_raw(UnsafePtr window, int32 slot, UnsafePtr<int32> counts, UnsafePtr<uint8> buttons,
+                                UnsafePtr<float32> axes, UnsafePtr<uint8> hats);
+extern fn int32 winseam_add_pad_mappings(UnsafeConstPtr<cchar> text, int32 length);
 
 unsafe fn void padSample(UnsafePtr window, int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
                          UnsafeConstPtr<float32> axes) {
@@ -141,4 +144,11 @@ unsafe fn int32 padNumber(UnsafePtr window, int32 slot, int32 which) {
 unsafe fn int32 padRumble(UnsafePtr window, int32 slot, float32 a, float32 b, int32 milliseconds, bool triggers) {
     if (triggers) { return winseam_pad_rumble_triggers(window: window, slot: slot, left: a, right: b, milliseconds: milliseconds); }
     return winseam_pad_rumble(window: window, slot: slot, strong: a, weak: b, milliseconds: milliseconds);
+}
+unsafe fn int32 padRaw(UnsafePtr window, int32 slot, UnsafePtr<int32> counts, UnsafePtr<uint8> buttons,
+                       UnsafePtr<float32> axes, UnsafePtr<uint8> hats) {
+    return winseam_pad_raw(window: window, slot: slot, counts: counts, buttons: buttons, axes: axes, hats: hats);
+}
+unsafe fn int32 addPadMappings(UnsafeConstPtr<cchar> text, int32 length) {
+    return winseam_add_pad_mappings(text: text, length: length);
 }

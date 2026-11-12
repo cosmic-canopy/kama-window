@@ -160,8 +160,9 @@ void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, c
 int32_t winseam_system_pad_rumbled(int32_t slot, float *motors, int32_t *milliseconds);
 // What the system says of the pad in `slot`, as `window` knows it: its name (`which` 0), its serial (1) or its id (2), the
 // system's own name for the device, copied into `into` (at most `capacity` bytes, UTF-8, not terminated), the length
-// returned; its USB vendor (`which` 0) or product (1), 0 when the system gives none, or what it can do (2): bits
-// WINSEAM_PAD_RUMBLE and WINSEAM_PAD_TRIGGER_RUMBLE. -1 when the window knows no pad there, or is headless.
+// returned; its USB vendor (`which` 0) or product (1), 0 when the system gives none, what it can do (2): bits
+// WINSEAM_PAD_RUMBLE and WINSEAM_PAD_TRIGGER_RUMBLE, or whether a mapping knows it (3): 1, or 0 for a pad read only raw.
+// -1 when the window knows no pad there, or is headless.
 int32_t winseam_pad_text(winseam_window *window, int32_t slot, int32_t which, uint8_t *into, int32_t capacity);
 int32_t winseam_pad_number(winseam_window *window, int32_t slot, int32_t which);
 #define WINSEAM_PAD_RUMBLE 1            // a strong (low-frequency) and a weak (high-frequency) motor
@@ -174,6 +175,22 @@ int32_t winseam_pad_number(winseam_window *window, int32_t slot, int32_t which);
 // that closes the window's pads stops each rumble the window started, as it releases each held button (decision 6).
 int32_t winseam_pad_rumble(winseam_window *window, int32_t slot, float strong, float weak, int32_t milliseconds);
 int32_t winseam_pad_rumble_triggers(winseam_window *window, int32_t slot, float left, float right, int32_t milliseconds);
+
+// The pad in `slot` as the system numbers its controls, before any mapping (WIN-4, decision 3): how many buttons, axes
+// and hats it has into `counts[3]` (at most 32, 8 and 4), each button 0 or 1 into `buttons[32]`, each axis -1 to 1 into
+// `axes[8]`, each hat into `hats[4]` (bits: 1 up, 2 right, 4 down, 8 left). 1 when `window` knows a pad there, 0 when not
+// or when it is headless. The values read 0 while its pads read neutral, as the standard view does.
+int32_t winseam_pad_raw(winseam_window *window, int32_t slot, int32_t *counts, uint8_t *buttons, float *axes,
+                        uint8_t *hats);
+#define WINSEAM_PAD_RAW_BUTTONS 32
+#define WINSEAM_PAD_RAW_AXES 8
+#define WINSEAM_PAD_RAW_HATS 4
+
+// Mappings for pads, `length` bytes of SDL's text format, a mapping a line (SDL_GameControllerDB's): kept, and applied
+// now and at each start of SDL, so a pad they name is mapped in its slot from then on. How many SDL took now; 0 when no
+// system window is open (they apply when one opens), and on the web, where the browser maps. Text SDL takes nothing
+// from is not kept.
+int32_t winseam_add_pad_mappings(const char *text, int32_t length);
 
 void winseam_size(winseam_window *window, int32_t *width, int32_t *height);
 void winseam_framebuffer_size(winseam_window *window, int32_t *width, int32_t *height);

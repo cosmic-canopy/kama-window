@@ -49,6 +49,14 @@ int32_t windowtests_sdl_running(void);
 // How many rumble requests SDL handed the virtual pad `id`, and the last ones' motors as SDL handed them (0 to 65535);
 // -1 when there is no such pad, or off Windows.
 int32_t windowtests_virtual_rumbled(uint32_t id, int32_t *low, int32_t *high, int32_t *left, int32_t *right);
+// A virtual pad SDL has no mapping for: a joystick of `buttons` buttons, `axes` axes and `hats` hats. Its id, or 0.
+uint32_t windowtests_virtual_joystick(const char *name, int32_t buttons, int32_t axes, int32_t hats);
+// A virtual pad's hat at `value` (SDL's bits: 1 up, 2 right, 4 down, 8 left).
+int32_t windowtests_virtual_hat(uint32_t id, int32_t hat, int32_t value);
+// A virtual pad's GUID as SDL writes it, 32 hex digits, into `into` (capacity at least 33); its length, or 0.
+int32_t windowtests_virtual_guid(uint32_t id, char *into, int32_t capacity);
+// 1 when SDL has a mapping for the pad with GUID `guid`, 0 when not; -1 off Windows.
+int32_t windowtests_mapping_known(const char *guid);
 
 // On the web, the tests' own JS library (tests/js/windowtests.js): DOM events dispatched at the element a selector names,
 // answering 1 when the event's default was left to the page and 0 when a listener prevented it, and what the window
