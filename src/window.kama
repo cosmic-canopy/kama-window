@@ -603,12 +603,8 @@ type resource Window {
         winseam_pad p = winseam_pad.zero();
         padRead(window: this.seam, slot: slot, into: cast<UnsafePtr>(addr(of: p)));
         g.connected = p.connected != 0;
-        // Element by element: a whole InlineArray assigned to or from an extern value's array field lowers to a C array
-        // assignment, which C refuses (KAMA_GAPS.md).
-        isize i = 0;
-        while (i < 17) { g.buttons[i] = p.buttons[i]; i = i + 1; }
-        i = 0;
-        while (i < 4) { g.axes[i] = p.axes[i]; i = i + 1; }
+        g.buttons = p.buttons;
+        g.axes = p.axes;
         return g;
     }
 
@@ -616,11 +612,11 @@ type resource Window {
     // queued, it makes the slot's connect, disconnect, downs and ups. A slot outside 0 to 15 is ignored.
     public unsafe fn void postPad(int32 slot, const ref Gamepad pad) {
         if (this.seam == null) { return; }
-        int32 connected = 0;
-        if (pad.connected) { connected = 1; }
-        // By its parts: kama cannot yet write into an extern value's array (KAMA_GAPS.md).
-        padSample(window: this.seam, slot: slot, connected: connected, buttons: addr(of: pad.buttons[0]),
-                  axes: addr(of: pad.axes[0]));
+        winseam_pad sample = winseam_pad.zero();
+        sample.connected = pad.connected ? 1 : 0;
+        sample.buttons = pad.buttons;
+        sample.axes = pad.axes;
+        padSample(window: this.seam, slot: slot, sample: sample);
     }
 
     // What the system says of the pad in `slot`, while the window knows a pad there (from its `PadConnected` to its

@@ -305,17 +305,6 @@ static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s) {
 
 void winseam_pad_sample(winseam_window *w, int32_t slot, const winseam_pad *sample) { pad_take(w, slot, sample); }
 
-void winseam_pad_post(winseam_window *w, int32_t slot, int32_t connected, const float *buttons, const float *axes) {
-    winseam_pad s;
-    memset(&s, 0, sizeof s);
-    s.connected = connected ? 1 : 0;
-    if (s.connected) {
-        memcpy(s.buttons, buttons, sizeof s.buttons);
-        memcpy(s.axes, axes, sizeof s.axes);
-    }
-    pad_take(w, slot, &s);
-}
-
 void winseam_pad_read(winseam_window *w, int32_t slot, winseam_pad *into) {
     memset(into, 0, sizeof *into);
     if (!slot_ok(slot)) return;

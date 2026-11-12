@@ -655,8 +655,9 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
      is tested through SDL's virtual pads, found by their names; the web's through a `navigator.getGamepads` of the
      tests' own (`tests/js/windowtests.js`), whose `pressed` is the browser's half-travel rule, so the package's 30 of 255
      is seen to win.
-   - **KWIN-1** (KAMA_GAPS.md): writing an `extern value`'s `InlineArray` field passes `kama check` and fails in C, so a
-     posted pad crosses the seam by its parts (`winseam_pad_post`).
+   - **KWIN-1** (KAMA_GAPS.md): writing an `extern value`'s `InlineArray` field passed `kama check` and failed in C, so a
+     posted pad crossed the seam by its parts. Fixed in kama 0.9.928 (KR-379); since then a posted pad crosses as a
+     whole `winseam_pad` (`winseam_pad_sample`), and `Window.pad` assigns each array whole.
 
    **Where it lives:**
    - `csrc/winseam.c`: the ring's pads (`pad_take`, the release, `stop_rumbles`), the system's table, the SDL backend

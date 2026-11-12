@@ -132,9 +132,6 @@ void winseam_release_held(winseam_window *window);
 // A pad's sample into slot `slot` (0 to WINSEAM_PADS - 1, any other ignored) as if the system had read it: compared with
 // what the consumer has seen, it makes the slot's events.
 void winseam_pad_sample(winseam_window *window, int32_t slot, const winseam_pad *sample);
-// The same, from its parts: WINSEAM_PAD_BUTTONS values at `buttons` and WINSEAM_PAD_AXES at `axes` (kama's arrays, which
-// cannot yet write into a winseam_pad's: KAMA_GAPS.md).
-void winseam_pad_post(winseam_window *window, int32_t slot, int32_t connected, const float *buttons, const float *axes);
 // The pad in `slot` as the consumer reads it: connected once its connect is queued; neutral while the window is unfocused
 // (unless pads are read in the background) and after a release until its next sample; all 0 for an empty slot.
 void winseam_pad_read(winseam_window *window, int32_t slot, winseam_pad *into);
