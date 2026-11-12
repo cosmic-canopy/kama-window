@@ -19,7 +19,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 
 | id | item | why |
 |---|---|---|
-| WIN-18 | **The browser leg in Firefox**, over WebDriver BiDi | [detail](ROADMAP_DETAIL.md#firefox) |
+| WIN-18 | **The browser leg in Firefox**, under `kama run`, the driver kept for trusted input | [detail](ROADMAP_DETAIL.md#firefox) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 

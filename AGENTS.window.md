@@ -670,7 +670,31 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    - `tests/src/pads.kama` (headless), `tests/src/systempads.kama` (natively), `tests/src/webpads.kama` (the web), and
      `tests/csrc/hooks.c`'s virtual pads.
 
-## Where the truth is
+10. **Decided on 2026-11-12, before it was built: the browser legs under `kama run` (WIN-18).** kama 0.9.928's
+    `kama run --target WASM` (KR-377) runs a page in any browser with no automation protocol, so the planned WebDriver
+    BiDi client was measured against it first: this package's browser leg and `@kama/gpu`'s under `kama run` in Edge
+    157, Chrome for Testing 157 and Firefox 160 (ROADMAP_DETAIL.md § WIN-18 has the table; kyoten's
+    `.scratch/win18-kamarun/`). Firefox runs every case Chromium runs; what fails in all three is trusted input (kama's
+    KR-378) and a device scale `kama run` cannot set. An unzipped Chrome for Testing never loads a page under
+    `kama run`, even with its folder given the read access an installed Chrome's has (`~/browsers/README.md`).
+
+    **Decided by the owner on 2026-11-12 (kyoten's sixteenth session), each as recommended,** asked in the chat after
+    the measurement ("Sounds good as recommended we can wait on kama for that"; then "I take your recommendation" for
+    the driver's browser, asked when Chrome for Testing would not run):
+    1. **`kama run` for every case it can run, Firefox among the browsers, and no BiDi client of the package's own.**
+       The browser leg is two runs of the same program:
+       - under `kama run --target WASM --headless`, in Edge and Chrome as installed and in the pinned Firefox. The
+         cases that need trusted input or a device scale of 1.5 are skipped there, each saying what it waits on;
+       - under `tools/webtest.mjs`, the DevTools-protocol driver, which passes `--driver` and runs the whole program at a
+         device scale of 1.5, performing its trusted input.
+       **Stopgap:** Firefox's own input (a wheel in lines, the order of its pointer lock and focus events) is untested
+       until KR-378 lands, and the driver stays until then. It is the reason KR-378 is raised with kama.
+    2. **The driver runs in the pinned Chrome for Testing alone,** until that browser runs under `kama run`. The
+       pinned Chromium so keeps every case, trusted input and the scale's included, and a red run in it can be
+       reproduced; `kama run` takes the browsers that run it. Chrome for Testing's silent hang is kyoten's KY-53.
+    3. **A device scale under `kama run` is kama's** (kyoten's KY-52, filed): until it lands, the scale cases run in
+       the driver's leg alone.
+
 
 - **This package's own documents,** above: the SPEC, the ROADMAP and its detail, and the CHANGELOG.
 - **The design started as kama's:** `../kama/docs/ROADMAP_DETAIL.md` § 8, at the anchor `s8-input`. Read it before

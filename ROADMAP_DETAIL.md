@@ -48,6 +48,11 @@ Firefox reports a mouse wheel in lines, and its pointer lock and focus may order
   under the stopgap without one. This package's take 65 to 224 s under `kama run`, all but a few waiting out the
   trusted-input steps, against 8.5 s.
 
+**Decided on 2026-11-12** (AGENTS.window.md item 10): no BiDi client. The leg runs the program under `kama run` in
+Edge, Chrome as installed and the pinned Firefox, skipping, by name, the cases that wait on trusted input (kama's
+KR-378) or a device scale (kyoten's KY-52); and under `tools/webtest.mjs`, with `--driver`, in the pinned Chrome for
+Testing alone, every case run. Done when both runs are green in `tools/test.sh`.
+
 <a id="pointer-samples"></a>
 ## WIN-19: every pointer sample
 
