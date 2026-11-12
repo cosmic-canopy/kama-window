@@ -7,12 +7,20 @@ tested. What comes next is [ROADMAP.md](ROADMAP.md), why the package departs fro
 **Where it stands** (2026-11-11, kama 0.9.911): a system window natively on Windows (GLFW 3.5.1, MSYS2's static
 build), on the web the page's canvas, and a headless window on every target, each with a counted native record, so a
 GPU surface holds its window. The mouse, touch and a pen are one stream of pointer events, as the W3C's Pointer Events
-are. The window keeps what is held, and releases it on a focus change. Not published.
+are. The window keeps what is held, and releases it on a focus change. Gamepads (2026-11-12): the browser's Gamepad API
+on the web, SDL3 natively on Windows, as events and state, with rumble, the mapping database and a raw view. Not
+published.
 
 ## Using it
 
 `import { window::Window, window::Event, window::Key, … }`. Natively, Windows links GLFW statically (`libglfw3.a`);
 Linux and macOS link a system `glfw`, untried. On the web the package links its own JS library (`js/winseam.js`).
+
+Natively on Windows the package also compiles SDL 3.4.18's gamepad subsystem, vendored in `third_party/` with
+SDL_GameControllerDB's Windows lines and Microsoft's GameInput header (`tools/vendor-sdl.sh`, `third_party/VENDORED.md`:
+zlib, zlib and MIT), and links C++'s runtime for SDL's GameInput layer; none of it reaches a web build. A program that
+wants GameInput on a machine without Microsoft's runtime installs Microsoft's redistributable itself, under Microsoft's
+license; without it, pads are read through XInput.
 
 ## Invariants
 
@@ -164,6 +172,9 @@ Linux and macOS link a system `glfw`, untried. On the web the package links its 
 | `Focus(focused)` | |
 | `PointerLock(locked)` | |
 | `CloseRequested` | |
+| `PadConnected(slot)` | a pad in `slot`, 0 to 15: a new connection, never silently the old pad |
+| `PadDisconnected(slot)` | after an up for each button it held |
+| `PadButtonDown(slot, button)`, `PadButtonUp(slot, button)` | a pad's button, paired as a key's: an up only after its down |
 | `Dropped(count)` | the queue was full, and this many events were lost |
 
 - **`Mods`** are bits: `Shift`, `Control`, `Alt`, `Super`, `CapsLock` and `NumLock`, as in `(mods & Mods::Shift) != 0`.
@@ -178,6 +189,47 @@ Linux and macOS link a system `glfw`, untried. On the web the package links its 
 - **`Key`** has 119 keys, each the DOM's `code` name with its HID id: letters, digits, the editing and navigation keys,
   F1 to F24, the keypad, the modifiers left and right, and the international keys. GLFW's key tokens translate through
   one table; a token the table does not map is `Key::Unknown`, and no two map to one `Key`.
+
+## Gamepads
+
+Each window has 16 pad slots, 0 to 15 (`Window::PadSlots`). Natively the system's pads come from SDL3, on the web from
+the browser's Gamepad API; a headless window has none of its own, and takes what a program posts. One pump of any
+system window reads the system's pads once and hands each slot to every open system window, as GLFW's events are.
+- **`pad(slot:) -> Gamepad`:** the pad as of the last `pump()`: `connected`, and the W3C's standard gamepad, its 17
+  buttons' travel (`value(button:)`, 0 to 1) and 4 axes (`axis(axis:)`, -1 to 1, right and down positive), as the
+  device reports them, with no dead zone: shaping a value (a dead zone, drift, a curve) is the consumer's. A button is
+  `pressed` at `Gamepad::PressedAt`, 30 of 255 of its travel, on every backend, whatever a browser calls pressed.
+- **`PadButton`** names the face buttons by their place (`South`, `East`, `West`, `North`), as `Key` names keys: Xbox's
+  A, PlayStation's Cross and Nintendo's B are each `South`. Then `LeftShoulder`, `RightShoulder`, `LeftTrigger`,
+  `RightTrigger`, `Back`, `Start`, `LeftStick`, `RightStick`, `DpadUp`, `DpadDown`, `DpadLeft`, `DpadRight` and `Guide`,
+  numbered as the W3C's standard gamepad. `PadAxis` is `LeftX`, `LeftY`, `RightX` and `RightY`.
+- **A pad's events:** a new pad takes the lowest free slot and keeps it while it stays. Its buttons' downs and ups are
+  events, the ups of a sample before its downs, each by number; its sticks and triggers' travel are state. A connect or
+  a down that finds the queue full is made again by the pad's next sample; the queue keeps a slot for each held
+  button's up and each pad's disconnect.
+- **Focus:** while the window is unfocused a pad reads neutral and makes no button events, unless
+  `WindowOptions.padsWhenUnfocused` (or `setPadsWhenUnfocused(on:)`) asks for pads in the background; turned off while
+  unfocused, what the pads hold is released at once. A focus change releases the mouse's buttons, then each pad's held
+  buttons slot by slot, then the keys, then says `Focus`; after a gain a button still held comes back as a down with
+  the pad's next sample. `releaseHeld()` lets go of the pads too, which then read neutral until their next sample.
+- **`padInfo(slot:) -> Optional<PadInfo>`:** what the system says of the pad, while the window knows one there:
+  `name()`, `vendor()` and `product()` (0 where not given), `serial()` (empty where it has none), `id()` (the system's
+  own name for the device; on Windows' GameInput the same for a pad across replugs and runs), `rumble()`,
+  `triggerRumble()` and `mapped()`. None for an empty slot, and always for a headless window.
+- **`rumble(slot:, strong:, weak:, milliseconds:) -> bool`** plays the low-frequency (`strong`) and high-frequency
+  (`weak`) motors, and **`rumbleTriggers(slot:, left:, right:, milliseconds:)`** the triggers', each clamped to 0 to 1;
+  all 0 stops. False with no such motor, no pad, a headless window, or pads reading neutral; a focus loss that closes
+  the pads stops each rumble the window started.
+- **`padRaw(slot:) -> PadRaw`:** the pad's controls as the system numbers them: up to 32 buttons, 8 axes and 4 hats
+  (`button(index:)`, `axis(index:)`, `hat(index:)`, each with its count). A pad no mapping knows (`mapped()` false) has
+  only this: its standard view stays at rest and its buttons make no events.
+- **`Window::addPadMappings(text:) -> int32`:** mappings in SDL's text format, a mapping a line. Natively they are
+  kept and applied at once and at each start of SDL, so a pad they name is mapped in its slot, and the number taken
+  is returned; 0 when no system window is open (they apply when one opens), and on the web, where the browser maps.
+- **`postPad(slot:, pad:)`:** a sample as if the system had read it, for tests and replays. A posted `PadConnected`,
+  `PadButtonDown`, `PadButtonUp` or `PadDisconnected` moves the pad as the system would: a down presses its button all
+  the way. `Gamepad.neutral()` is a pad at rest, `Gamepad.disconnected()` an empty slot, and `press`, `release`,
+  `setValue` and `setAxis` set one.
 
 ## NativeWindow
 
@@ -217,6 +269,16 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - **No `CloseRequested`:** a page's close never waits for the program. Its visibility is `std::app`'s `Suspended`.
   - **A wheel's unit is the browser's** (`Pixels` in Chromium; `Lines` where a browser says lines), and a page's worth
     is the canvas's height in pixels.
+- **Pads, natively: SDL3, on Windows so far** (Linux and macOS with WIN-12). Its gamepad subsystem runs alone beside
+  GLFW's windows, starting with the first system window and stopping with the last. On Windows it reads GameInput where
+  Microsoft's runtime (1.1 or newer) is installed and XInput where it is not; while GameInput is usable XInput is off,
+  since SDL 3.4 with both adds a replugged pad twice (the stopgap, WIN-23). A pad reports in the background; the
+  window's rule decides what it reads. SDL never takes the program's Ctrl+C.
+- **Pads on the web: the Gamepad API.** A browser lists no pad until the user presses one with the page focused. A
+  slot is the pad's browser index. A pad's `id` is its name, its vendor and product read from it where Chromium or
+  Firefox writes them, with no serial, no device id and no hats. Chromium gives no pad input while the page is unfocused
+  or hidden; Firefox gives it while the page is visible. Rumble is the actuator's `dual-rumble` and `trigger-rumble`
+  (Chromium, Safari); Firefox has none. A pad the browser does not map is read raw.
 - **Held keys and buttons: nothing.** Every backend gives the same events. GLFW releases the keys and buttons it holds
   itself, after the focus callback and only on a loss, each with mods 0; the window has released them by then, so each
   of those ups is dropped (measured on GLFW 3.5.1, AGENTS.window.md item 5). A browser sends no `keyup` after a blur.
@@ -225,7 +287,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 140 cases. They cover:
+- `tests/`, one program, natively, debug and release: 249 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - what is held, on a headless window (`tests/src/held.kama`): the pairing of ups and downs, `Key::Unknown`, the
     release's order and bits, the room kept for ups in a full ring, a replayed stream, and `releaseHeld`;
@@ -244,15 +306,23 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     resize the system makes, through Win32 hooks of the tests' own;
   - the options: an unfocused window shown without taking the foreground, and, on hidden windows read through GLFW's
     `FOCUS_ON_SHOW`, an unfocused open asking for no focus and a plain open after it asking for the focus again, and
-    `openIn` opening a system window, its canvas unused.
+    `openIn` opening a system window, its canvas unused;
+  - pads on a headless window (`tests/src/pads.kama`): connects, downs and ups, the threshold, a disconnect's release,
+    the focus release's order, neutral while unfocused and after a release, pads in the background, posted pad events,
+    the slots, and the room kept in a full ring;
+  - the system's pads natively (`tests/src/systempads.kama`), with the system's read replaced for the whole run so no
+    case depends on the pads plugged in: one pump filling every system window, `padInfo`, rumble and its refusals and
+    stops (the focus given and taken by window messages), and SDL's own path through SDL's virtual pads: the standard
+    layout, rumble reaching SDL, the slots, the shipped database, a pad read raw and mapped in place, a remapping, and
+    mappings kept across SDL's restarts.
 
   The system windows are skipped when `KAMA_WINDOW_NO_DISPLAY` is set. **A test run never takes the keyboard:** every
   window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
   the program shows no more once one has taken the foreground;
-- the same program under node: 103 cases, the headless ones, the DOM key table, and checks that opening a window
+- the same program under node: 163 cases, the headless ones, the DOM key table, and checks that opening a window
   refuses with no page.
 - the same program in every headless Chromium present (a Chrome for Testing pinned under `~/browsers`, Edge, Chrome;
-  `KAMA_BROWSER` names one), built for the web with its own page, `tests/web/shell.html`: 189 cases. Beside the headless ones (`tests/src/web.kama`):
+  `KAMA_BROWSER` names one), built for the web with its own page, `tests/web/shell.html`: 264 cases. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,
@@ -261,6 +331,10 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     pixels alone, a new CSS size); dispatched as DOM events, in-process;
   - `openIn`: its refusals, two canvases as two windows each with its own queue, a canvas's own tabindex kept, and a
     canvas the page lays out (`sizedByPage`);
+  - the page's pads through a `navigator.getGamepads` of the tests' own (`tests/src/webpads.kama`): a slot by its
+    browser index, the browser's values untouched and its `pressed` overruled at 30 of 255, Chromium's and Firefox's
+    vendor and product, a pad the browser does not map read raw, rumble through the actuator, the focus release and the
+    actuator's reset, and disconnects;
   - `sizedByPage` on canvases the page does not size (WIN-21): one with no CSS size, one sized by its attributes alone
     and one filling a parent sized by its children, each refused in the words below and left with its pixels and
     styles as they were, and still a window without `sizedByPage`; one sized by its width alone and one by its height

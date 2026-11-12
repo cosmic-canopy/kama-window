@@ -15,17 +15,17 @@
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: gamepads
+## NOW: the browser leg in Firefox
 
 | id | item | why |
 |---|---|---|
-| WIN-4 | **Gamepads**: the Gamepad API on the web, SDL3 natively (GameInput on Windows), as events and state, with rumble, held buttons released on a focus change as keys are | [detail](ROADMAP_DETAIL.md#gamepads) |
+| WIN-18 | **The browser leg in Firefox**, over WebDriver BiDi | [detail](ROADMAP_DETAIL.md#firefox) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 
 | id | item | why |
 |---|---|---|
-| WIN-23 | **SDL's own switch from XInput to GameInput**: when an SDL release has it, the vendored SDL moves to it and WIN-4's stopgap goes | [detail](ROADMAP_DETAIL.md#sdl-gameinput-fix) |
+| WIN-23 | **SDL's own switch from XInput to GameInput**: when an SDL release has it, the vendored SDL moves to it and the gamepads' stopgap goes | [detail](ROADMAP_DETAIL.md#sdl-gameinput-fix) |
 | WIN-22 | **A pad's motion sensors, touchpad and lights**: natively through SDL3, on the web only through WebHID | [detail](ROADMAP_DETAIL.md#pad-sensors) |
 | WIN-5 | **Text input with IME composition** | [detail](ROADMAP_DETAIL.md#ime) |
 | WIN-17 | **Keyboards beyond the US layout**: their extra keys named, and each key's label in the player's layout | [detail](ROADMAP_DETAIL.md#international-keys) |
@@ -37,7 +37,6 @@ a page can do with a canvas, a program can do with a window on every platform.
 | WIN-11 | **Touch and pen natively**, where GLFW gives only a mouse | [detail](ROADMAP_DETAIL.md#native-pointers) |
 | WIN-12 | **Linux and macOS**: X11, Wayland and Cocoa handles, run and tested there and on the Steam Deck | [detail](ROADMAP_DETAIL.md#desktop-platforms) |
 | WIN-13 | **Android**: the window from `std::app`'s `SurfaceReady` to `SurfaceLost`, its input, and focus from the lifecycle | [AGENTS.window.md, item 7](AGENTS.window.md#where-this-departs-from-kamas-design-s8-input) |
-| WIN-18 | **The browser leg in Firefox**, over WebDriver BiDi | [detail](ROADMAP_DETAIL.md#firefox) |
 | WIN-19 | **Every pointer sample**, for a drawing program: coalesced and predicted events, and high-rate input natively | [detail](ROADMAP_DETAIL.md#pointer-samples) |
 | WIN-14 | **GLFW vendored** in the package, in place of MSYS2's and the system's | [detail](ROADMAP_DETAIL.md#vendored-glfw) |
 | WIN-15 | **The first publish**, before `@kama/gpu`'s: `tests/` green on every target the package claims, the web in Chromium and Firefox, the stopgaps gone, GLFW vendored | [detail](ROADMAP_DETAIL.md#publish) |

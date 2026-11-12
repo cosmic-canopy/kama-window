@@ -5,6 +5,16 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Gamepads** (WIN-4, 2026-11-12, kama 0.9.911; AGENTS.window.md item 9). Sixteen slots per window: `Window.pad` (a
+  `Gamepad`: the W3C standard gamepad's 17 buttons and 4 axes, untouched, a button pressed at 30 of 255),
+  `PadConnected`, `PadDisconnected`, `PadButtonDown` and `PadButtonUp`, `padInfo`, `rumble` and `rumbleTriggers`,
+  `padRaw` for a pad no mapping knows, `Window::addPadMappings`, `postPad`, and `WindowOptions.padsWhenUnfocused` with
+  `setPadsWhenUnfocused`. A focus change releases pad buttons after the mouse's and before the keys, and stops the
+  window's rumbles. On the web through the Gamepad API; natively through SDL 3.4.18, vendored with
+  SDL_GameControllerDB's Windows lines and Microsoft's GameInput header, on Windows, GameInput where Microsoft's
+  runtime is installed and XInput otherwise. **`Event` has four new cases:** an exhaustive `match` on it gains them.
+  `tests/` gains 109 cases natively (249), 60 under node (163) and 75 in each browser (264).
+
 - **Under `WindowOptions.sizedByPage`, `open` refuses a canvas the page sizes on neither axis** (WIN-21, 2026-11-11,
   kama 0.9.911). Such a canvas is laid out at its pixel size, and the window sets the pixels from the layout × the
   device pixel ratio, so above a ratio of 1 it grew each frame. Before touching anything of the canvas, `open` changes

@@ -34,8 +34,9 @@ window's native record counted, so a GPU surface holds it (WIN-1, built), a wind
 asked (WIN-16, built), the window keeps what is held and releases it on a focus change (WIN-2, built), and the web half
 with Pointer Events on every backend (WIN-3, built), and a window's pixel size through its handle (WIN-20, built, for
 `@kama/gpu`'s GPU-3), and under `sizedByPage` `open` refuses a canvas the page sizes on neither axis (WIN-21, built).
-`tests/` runs natively, under node and in every headless browser present (a Chrome for Testing pinned under
-`~/browsers`, Edge). Gamepads (WIN-4) are next. `tools/test.sh` passes before every commit.
+Gamepads are built (2026-11-12, item 9): on the web through the Gamepad API, natively through SDL3, vendored, on
+Windows so far. `tests/` runs natively, under node and in every headless browser present (a Chrome for Testing pinned
+under `~/browsers`, Edge). The browser leg in Firefox (WIN-18) is next. `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -524,6 +525,139 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
      `WindowOptions.sizedByPage`;
    - `tests/src/pointers.kama`, `tests/src/web.kama`, `tests/src/keys_web.kama`, `tests/js/windowtests.js`,
      `tests/web/shell.html`, and `tools/webtest.mjs`.
+
+9. **Built on 2026-11-12: gamepads (WIN-4)** (kama 0.9.911), on the web through the browser's Gamepad API and natively
+   through SDL3, vendored. How it was decided is first, as the row's detail held it; how it was built is at this item's
+   end.
+
+   - **The model is the W3C Gamepad API's:** a pad connected or disconnected, its buttons and axes, the standard mapping.
+   - **Split screen is pads** (the owner, 2026-11-10: "Controllers are the natural split screen solve"). Several keyboards
+     and mice on one machine are not pursued, since a browser cannot tell them apart.
+
+   **Measured first, on 2026-11-11 and 2026-11-12** (kyoten's `.scratch/win4-gamepads/FINDINGS.md`), on Windows 11 with
+   the owner's pads, each wired: an Xbox 360 pad, an Xbox Series pad and an 8BitDo Ultimate. C probes over MSYS2's GLFW
+   3.5.1 and SDL3 3.4.18, every press made with another window focused unless stated; the probe page in visible Edge 157
+   and Firefox 160.
+   - **GLFW adds a replugged pad a second time, through DirectInput, with its right trigger reading fully pulled:** 9 of
+     20 replugs, both Xbox pads. Read in its source: DirectInput skips a pad only once Windows' raw-input list names it,
+     which races its arrival. GLFW also has no rumble, no Guide button on XInput pads, and no model for an XInput pad.
+   - **A pad reports to a program in the background** through XInput, GLFW and SDL alike. Unity's "a Windows program
+     needs the focus" is its Windows.Gaming.Input backend.
+   - **SDL3, initialised as `SDL_INIT_GAMEPAD` alone beside a GLFW window** (Godot 4.5's arrangement), never duplicated a
+     pad on one backend (12 replugs), and names each pad's type and labels.
+   - **Windows' pad backends, through SDL:**
+     - XInput, SDL's default: reads in the background, plays dual rumble, has no trigger rumble, and reports an Xbox One
+       or Series pad as a generic one.
+     - Windows.Gaming.Input: **gives no input at all while the window is unfocused**, and does not take the 360 pad.
+     - GameInput: needs Microsoft's runtime 1.1 or newer (the inbox `GameInput.dll` here is 0.2309, API 0; with the
+       redistributable 3.5.283 installed, SDL takes it). It reads all three pads in the background, plays dual rumble,
+       trigger rumble and each motor alone (the owner felt every one, each distinct), names each pad's maker and model
+       (8BitDo's 2dc8/3106 too), and gives each pad a device id that held across every replug and run.
+     - **With GameInput and XInput both on, SDL 3.4.18 adds a replugged 360 pad twice** (2 of 2): XInput sees it about
+       220 ms before GameInput reports it. SDL's main branch turns XInput and DirectInput off while GameInput handles Xbox
+       pads; 3.4.20 (2026-11-03), the newest release, does not.
+   - **The browsers:**
+
+     | | Edge 157 | Firefox 160 |
+     |---|---|---|
+     | exposed | every pad on one press | each pad on its own activity, once while unfocused |
+     | `id` | "Xbox 360 Controller (XInput STANDARD GAMEPAD)" for both Xbox pads | "xinput" |
+     | rumble | `dual-rumble` on both, `trigger-rumble` on the Series pad, felt | no `vibrationActuator` |
+     | visible, unfocused | no input | input |
+     | minimized | no input | no input |
+     | a replug | the same index back, exposed at once, no duplicate | the same |
+
+   - **Chromium applies no dead zone** to an XInput pad's sticks and calls a trigger pressed at 30 of 255 (read in
+     `xinput_data_fetcher_win.cc`). The 360 pad's right stick rests 0.11 off centre.
+   - **Licences:** SDL is zlib; Microsoft's GameInput header and loader are MIT; its runtime installer is under
+     Microsoft's redistributable licence.
+
+   **Decided by the owner on 2026-11-12, each as recommended** ("All of this sounds great"):
+   1. **Natively, SDL3's gamepad subsystem, alone** (`SDL_INIT_GAMEPAD`, no SDL window), beside GLFW's windows. **On the
+      web, the browser's Gamepad API from `js/winseam.js`, and nothing else:** no SDL and no mapping database in a web
+      build (the owner: as lean as possible on the web).
+   2. **Both events and state.** A pad's connection and each button's down and up are events in the one queue, under the
+      keys' pairing rule (item 5, decision 1). The whole pad, each button's analog value and the axes, is state read after
+      each `pump()`. Axis motion is not queued.
+      - **2a. Dead zones, drift and response curves are the consumer's,** in its bindings. The package reports values as
+        the device gives them, and decides only when an analog trigger is pressed: at 30 of 255, XInput's threshold and
+        Chromium's, computed by the package from the value on every backend.
+   3. **The W3C standard layout everywhere:** 17 buttons with analog values and 4 axes, the triggers 0 to 1 natively too.
+      Face buttons by position (`South`, `East`, `West`, `North`), as `Key` names positions; each pad's own labels (A,
+      Cross, B) for prompts go with WIN-17's. A raw view for a pad nothing maps. Natively, SDL's mapping database, shipped
+      and updatable at run time; none on the web, where the browser maps.
+   4. **Slots, the lowest free, reused,** as the browser and SDL's player index do. Each connection is a new one and
+      carries what is known: the name, the vendor and product where given, a serial where there is one, and natively
+      GameInput's device id. Which player a returning pad belongs to is the consumer's.
+   5. **Reading pads while unfocused is off by default,** a setting a program changes at any time. Off, a pad reads
+      neutral while the window is unfocused, on every backend. On, it reads in the background natively, and on the web as
+      far as the browser gives (Firefox while visible, Chromium not).
+   6. **Item 5's release extends to pads.** On a focus change, with 5 off, a button-up for each held pad button, and the
+      state neutral until the focus returns. The order: mouse buttons, pad buttons slot by slot, keys by HID id,
+      `PointerLock(false)`, `Focus`. A button still held after a gain comes back as a down on the next read. With 5 on,
+      pads are not released.
+   7. **Rumble in this row:** dual rumble, trigger rumble and each motor alone where a backend can, and a query of what a
+      pad supports, since Firefox and a pad without motors have none. Gyro, accelerometer, touchpad and lights are WIN-22.
+   8. **Tests:** the seam reads pads through one function per backend (SDL natively, `navigator.getGamepads()` on the
+      web), which the tests replace, a C hook natively and a `getGamepads` shim with a dispatched `gamepadconnected` in the
+      browser, so the path from a sample to events, state and releases is the real one. A headless window takes a pad
+      state a program posts, as `post()` takes events.
+   9. **On Windows, GameInput where Microsoft's runtime is present, XInput otherwise;** SDL falls back by itself (measured).
+      Shipping Microsoft's GameInput installer is each program's choice, under Microsoft's licence. **Stopgap:** with both
+      on, SDL 3.4.18 duplicates a replugged pad, so the package turns XInput off when GameInput is usable, as SDL's main
+      branch does, until an SDL release does it (WIN-23).
+
+   **Applied from `AGENTS.package.md`, not asked:** SDL3 is vendored, not linked, since MSYS2's is built without GameInput
+   and the rule is a vendored C library. `tools/vendor-sdl.sh` pins an SDL 3.4 release and Microsoft's GameInput header by
+   hash, and kama compiles the gamepad subset on every native target, with SDL's zlib notice and the header's MIT notice
+   beside it. Whether GameInput's device id follows a pad to another USB port was not measured in the building: it
+   needs a pad moved between ports by hand, at the next session with pads.
+
+   **Built, in five commits, test-first, each part's mutations caught or explained:**
+   - **The ring** (part A): each window keeps its own view of each of 16 slots; a sample, the system's or a post's, is
+     compared with what the consumer has seen, so a pad's connect and disconnect and each button's down and up are
+     events, and the whole pad is state (`Window.pad`, a `Gamepad`). The ring keeps a slot for each held pad button's up
+     and each known pad's disconnect; a connect or a down counted into a drop is made again by the next sample.
+   - **SDL natively** (part B1): SDL's gamepad subsystem starts with the first system window and stops with the last;
+     each pump of a system window reads SDL once into one process-wide table and hands every slot to every open system
+     window; `Window.padInfo` gives what the system says of a pad.
+   - **Rumble** (part B2): `Window.rumble` and `rumbleTriggers`, with `PadInfo.rumble` and `triggerRumble`.
+   - **The mapping** (part B3): SDL_GameControllerDB's Windows lines shipped, `Window::addPadMappings`, and a pad no
+     mapping knows read raw (`Window.padRaw`, `PadInfo.mapped`), mapped in place when a mapping arrives.
+   - **The web** (part C): each pump reads `navigator.getGamepads()` into the same table; rumble through the
+     actuator's effects.
+
+   **Decided in the building, within the decisions:**
+   - **Every button is pressed at 30 of 255 of its travel, computed by the package from its value** (decision 2a's
+     rule for the triggers, which leaves a digital button unchanged): the browser's own `pressed` is not read.
+   - **A rumble follows the pads' focus rule:** refused while the window's pads read neutral, and each rumble the
+     window started stopped when its pads close at a focus loss, as its held buttons are released (decisions 5 and 6;
+     Unity's input system pauses haptics on a focus loss, from memory). The owner was told, and did not object.
+   - **A trigger rumble is refused for a pad with no trigger motors,** on every backend, so a program is never told one
+     played: SDL's GameInput driver sends it regardless, and the owner felt the 360 pad and the 8BitDo buzz for it.
+   - **SDL never takes the program's Ctrl+C** (`SDL_HINT_NO_SIGNAL_HANDLERS`), and its own background gate is off: the
+     window decides what an unfocused pad reads.
+   - **A pad keeps the slot it took; a new one takes the lowest free,** natively as the browser does (its index).
+   - **The web gives a pad no serial and no device id,** and no hats; a pad's vendor and product are read from its id,
+     as Chromium and Firefox each write them.
+   - **The tests read no real pad but where a case asks for one** (decision 8): the run replaces the system's read with
+     an empty table, so a run never depends on the pads plugged into the machine, and never rumbles one. SDL's own path
+     is tested through SDL's virtual pads, found by their names; the web's through a `navigator.getGamepads` of the
+     tests' own (`tests/js/windowtests.js`), whose `pressed` is the browser's half-travel rule, so the package's 30 of 255
+     is seen to win.
+   - **KWIN-1** (KAMA_GAPS.md): writing an `extern value`'s `InlineArray` field passes `kama check` and fails in C, so a
+     posted pad crosses the seam by its parts (`winseam_pad_post`).
+
+   **Where it lives:**
+   - `csrc/winseam.c`: the ring's pads (`pad_take`, the release, `stop_rumbles`), the system's table, the SDL backend
+     (Windows) and the web's; `csrc/winseam_gameinput.cpp`: SDL's own test of GameInput, for the stopgap (WIN-23);
+   - `js/winseam.js`: `winseam_web_pads_read`, `winseam_web_pad`, `winseam_web_rumble`;
+   - `src/window.kama`: `Gamepad`, `PadButton`, `PadAxis`, `PadInfo`, `PadRaw`, the four events, and the window's pad
+     methods;
+   - `third_party/` and `tools/vendor-sdl.sh`: SDL 3.4.18, its Windows configuration, SDL_GameControllerDB's Windows
+     lines and Microsoft's GameInput header, pinned by hash (`third_party/VENDORED.md`);
+   - `tests/src/pads.kama` (headless), `tests/src/systempads.kama` (natively), `tests/src/webpads.kama` (the web), and
+     `tests/csrc/hooks.c`'s virtual pads.
 
 ## Where the truth is
 
