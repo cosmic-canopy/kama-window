@@ -18,7 +18,8 @@
     - #bychild, 100% of a parent sized by its children: on both axes too, so it would grow, then stop;
     - #widthonly, 100% of a box 400 px wide, height auto, and #heightonly, 100% of a box 300 px tall, width auto: the
       page sizes one axis and the pixels' aspect the other, which holds.
-  The program's output goes to the console, which the driver reads.
+  The program's output goes to the console, which the driver reads; `kama run` reads it itself. The page's query is
+  the program's arguments (`?arg=--driver`), which `kama run -- <args>` replaces.
 -->
 <style>
   html, body { margin: 0; padding: 0; }
@@ -50,6 +51,7 @@
 <div id="tallbox"><canvas id="heightonly"></canvas></div>
 <script>
   var Module = {
+    arguments: new URLSearchParams(location.search).getAll('arg'),   // the driver opens `?arg=--driver`
     print: function (text) { console.log(text); },
     printErr: function (text) { console.error(text); },
   };

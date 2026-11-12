@@ -10,16 +10,16 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-24**
+**Next id: WIN-25**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: the browser leg in Firefox
+## NOW: waiting on kama; kyoten's order goes on in `@kama/gpu` (GPU-4)
 
 | id | item | why |
 |---|---|---|
-| WIN-18 | **The browser leg in Firefox**, under `kama run`, the driver kept for trusted input | [detail](ROADMAP_DETAIL.md#firefox) |
+| WIN-24 | **The driver retired**: trusted input, a device scale and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 

@@ -1,6 +1,8 @@
 file @compileFor(ARCH_WASM32);
 // WIN-3: a window on a canvas (AGENTS.window.md item 8). Under node there is no page, and opening refuses. In a browser
-// (tools/webtest.mjs runs the program in tests/web/shell.html) the window opens on #canvas, and:
+// the window opens on #canvas (tests/web/shell.html), in one of two runs (AGENTS.window.md item 10): under
+// `kama run --target WASM`, or under tools/webtest.mjs, the driver, which passes `--driver`, sets a device scale of 1.5
+// and performs trusted input. Without the driver, the cases that need either are skipped, each saying so. Then:
 // - `webWindow` holds what follows at once: DOM events dispatched at the page's elements, the web's equivalent of the
 //   Win32 messages natively, reach the window's listeners before the dispatch returns, and `pump()` takes them;
 // - `webFinish` holds what takes the browser's own time or input: a resize, which the ResizeObserver reports between
@@ -8,7 +10,7 @@ file @compileFor(ARCH_WASM32);
 //   one step a tick, and prints the summary when done.
 
 import {
-    core::println,
+    core::println, core::env::args, core::env::Args,
     std::app::App, std::app::Lifecycle, std::app::run, std::app::quit,
     Tally, describe, quietly, drained, expectDrained, summary, webPadCases,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Pointer, window::CursorMode,
@@ -128,6 +130,27 @@ unsafe fn void check(ref Tally t, const ref string name, bool ok, const ref stri
     if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
 }
 
+// Whether tools/webtest.mjs runs the program (`--driver`): it sets a device scale of 1.5 and performs trusted input,
+// neither of which a page can do itself, nor `kama run` yet (kama's KR-378, kyoten's KY-52).
+unsafe fn bool driven() {
+    Args a = args();
+    int32 i = 0;
+    while (i < a.count()) {
+        Optional<string> one = a.get(at: i);
+        bool found = match (one) { case Some(value: s): s == "--driver"; case None: false; };
+        if (found) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+// A case written for the driver's device scale of 1.5, where pixels are not CSS pixels. Without the driver the page is at
+// the display's own scale, 1 headless, where the case would say nothing, so it is skipped, saying so.
+unsafe fn void scaledCheck(ref Tally t, const ref string name, bool ok, const ref string why) {
+    if (driven()) { check(t: t, name: name, ok: ok, why: why); return; }
+    println(s: "skip ${name}: it needs the driver's device scale of 1.5, which `kama run` cannot set (kyoten's KY-52)");
+}
+
 // What the queue holds after a pump.
 unsafe fn string pumped(ref Window w) {
     w.pump();
@@ -182,11 +205,11 @@ unsafe fn void openedCases(ref Tally t, ref Window w) {
     Size s = w.size();
     Size px = w.framebufferSize();
     float32 scale = w.scale();
-    check(t: t, name: "a window on #canvas is width × height logical, and pixels at the device's scale (1.5)",
+    scaledCheck(t: t, name: "a window on #canvas is width × height logical, and pixels at the device's scale (1.5)",
           ok: s.width == 320 && s.height == 200 && px.width == 480 && px.height == 300 && scale == 1.5,
           why: "${s.width}×${s.height} logical, ${px.width}×${px.height} pixels, scale ${scale}");
     Size b = backing();
-    check(t: t, name: "the canvas's backing store is the window's pixels", ok: b.width == 480 && b.height == 300,
+    scaledCheck(t: t, name: "the canvas's backing store is the window's pixels", ok: b.width == 480 && b.height == 300,
           why: "${b.width}×${b.height}");
     check(t: t, name: "the window sets the canvas's CSS size inline",
           ok: styleIs(prop: "width", value: "320px") && styleIs(prop: "height", value: "200px"), why: "it does not");
@@ -472,7 +495,7 @@ unsafe fn void canvases(ref Tally t) {
     t.verdict(name: "two canvases are two windows", why: "");
     Size bs = b.size();
     Size bp = b.framebufferSize();
-    check(t: t, name: "a window on a named canvas has its own size and pixels",
+    scaledCheck(t: t, name: "a window on a named canvas has its own size and pixels",
           ok: bs.width == 100 && bs.height == 50 && bp.width == 150 && bp.height == 75,
           why: "${bs.width}×${bs.height} logical, ${bp.width}×${bp.height} pixels");
     check(t: t, name: "a canvas's own tabindex is kept", ok: attrOf(sel: "#second", name: "tabindex", value: "-1"),
@@ -506,7 +529,7 @@ unsafe fn void canvases(ref Tally t) {
             Window p = give v;
             Size ps = p.size();
             Size pp = p.framebufferSize();
-            check(t: t, name: "with sizedByPage, the page's layout is the size, and width and height go unused",
+            scaledCheck(t: t, name: "with sizedByPage, the page's layout is the size, and width and height go unused",
                   ok: ps.width == 200 && ps.height == 100 && pp.width == 300 && pp.height == 150,
                   why: "${ps.width}×${ps.height} logical, ${pp.width}×${pp.height} pixels");
             check(t: t, name: "and the canvas's own CSS size is left alone", ok: styleOf(sel: "#paged", prop: "width", value: ""),
@@ -576,7 +599,7 @@ unsafe fn void pageSized(ref Tally t) {
             Window ww = give v;
             Size ws = ww.size();
             Size wp = ww.framebufferSize();
-            check(t: t, name: "under sizedByPage, a canvas the page sizes by its width alone opens, its pixels' aspect giving its height",
+            scaledCheck(t: t, name: "under sizedByPage, a canvas the page sizes by its width alone opens, its pixels' aspect giving its height",
                   ok: ws.width == 400 && ws.height == 200 && wp.width == 600 && wp.height == 300,
                   why: "${ws.width}×${ws.height} logical, ${wp.width}×${wp.height} pixels");
         }
@@ -593,7 +616,7 @@ unsafe fn void pageSized(ref Tally t) {
             Window tw = give v;
             Size ts = tw.size();
             Size tp = tw.framebufferSize();
-            check(t: t, name: "and one it sizes by its height alone, its pixels' aspect giving its width",
+            scaledCheck(t: t, name: "and one it sizes by its height alone, its pixels' aspect giving its width",
                   ok: ts.width == 600 && ts.height == 300 && tp.width == 900 && tp.height == 450,
                   why: "${ts.width}×${ts.height} logical, ${tp.width}×${tp.height} pixels");
         }
@@ -698,9 +721,14 @@ type resource WebRun implements App {
             Size sz = this.window.size();
             Size px = this.window.framebufferSize();
             Size b = backing();
-            check(t: this.tally, name: "and its pixels follow, exact from the device-pixel box",
+            scaledCheck(t: this.tally, name: "and its pixels follow, exact from the device-pixel box",
                   ok: sz.width == 400 && px.width == 600 && px.height == 300 && b.width == 600,
                   why: "${sz.width} logical, ${px.width}×${px.height} pixels, backing ${b.width}");
+            if (!driven()) {
+                println(s: "skip the trusted-input steps, a real click, keys, a drag, a touch and pointer lock: they need the driver (kama's KR-378)");
+                println(s: "skip a window the page sizes on one axis holds still through the browser's frames: it needs the driver's device scale of 1.5, which `kama run` cannot set (kyoten's KY-52)");
+                return this.done();
+            }
             this.request(what: "click #canvas 30 30");
             return true;
         }

@@ -35,8 +35,9 @@ asked (WIN-16, built), the window keeps what is held and releases it on a focus 
 with Pointer Events on every backend (WIN-3, built), and a window's pixel size through its handle (WIN-20, built, for
 `@kama/gpu`'s GPU-3), and under `sizedByPage` `open` refuses a canvas the page sizes on neither axis (WIN-21, built).
 Gamepads are built (2026-11-12, item 9): on the web through the Gamepad API, natively through SDL3, vendored, on
-Windows so far. `tests/` runs natively, under node and in every headless browser present (a Chrome for Testing pinned
-under `~/browsers`, Edge). The browser leg in Firefox (WIN-18) is next. `tools/test.sh` passes before every commit.
+Windows so far. `tests/` runs natively, under node and in every headless browser present (item 10): under `kama run`
+in Edge and the pinned Firefox, and through the driver in the pinned Chrome for Testing, every case. Retiring the
+driver waits on kama (WIN-24). `tools/test.sh` passes before every commit.
 
 ## Where this departs from kama's design (s8-input)
 
@@ -448,8 +449,9 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
           throwaway profile, and reads the console to the last line, an abort or a time limit. In-process cases dispatch
           DOM events from the test program, the web's Win32 messages; the cases that need the browser's own behaviour
           print a request, and the driver performs it as trusted input. The node leg stays, for the headless cases.
-       2. **Firefox is a row of its own before the first publish (WIN-18):** it dropped the DevTools protocol, so it
-          needs a WebDriver BiDi client and Firefox installed. Safari waits for a Mac (WIN-12).
+       2. **Firefox is a row of its own before the first publish:** it dropped the DevTools protocol, so it needs a
+          WebDriver BiDi client and Firefox installed. Safari waits for a Mac (WIN-12). **Superseded on 2026-11-12**
+          (item 10): Firefox runs the leg under `kama run`, with no client of the package's own.
    11. **A canvas is named by a ctor of its own, `Window.openIn(canvas:, title:, width:, height:, options:)`** (asked on
        the way, decided by the owner on 2026-11-11 as recommended: "I think I'll take your recommendation for q11").
        - **Found:** the draft was `options.canvas = "#game"`, but a `type value` cannot hold a `string` (kama 0.9.911:
@@ -670,13 +672,40 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
    - `tests/src/pads.kama` (headless), `tests/src/systempads.kama` (natively), `tests/src/webpads.kama` (the web), and
      `tests/csrc/hooks.c`'s virtual pads.
 
-10. **Decided on 2026-11-12, before it was built: the browser legs under `kama run` (WIN-18).** kama 0.9.928's
+10. **Decided on 2026-11-12, before it was built: the browser legs under `kama run`, Firefox among them.** kama 0.9.928's
     `kama run --target WASM` (KR-377) runs a page in any browser with no automation protocol, so the planned WebDriver
     BiDi client was measured against it first: this package's browser leg and `@kama/gpu`'s under `kama run` in Edge
-    157, Chrome for Testing 157 and Firefox 160 (ROADMAP_DETAIL.md § WIN-18 has the table; kyoten's
-    `.scratch/win18-kamarun/`). Firefox runs every case Chromium runs; what fails in all three is trusted input (kama's
-    KR-378) and a device scale `kama run` cannot set. An unzipped Chrome for Testing never loads a page under
-    `kama run`, even with its folder given the read access an installed Chrome's has (`~/browsers/README.md`).
+    157, Chrome for Testing 157 and Firefox 160 (kyoten's `.scratch/win18-kamarun/`), under `kama run … --target WASM
+    --headless`, against the driver on the same builds:
+
+    | | Edge 157 | Chrome for Testing 157 | Firefox 160 |
+    |---|---|---|---|
+    | `@kama/window`'s tests (stopgap: 264, 0 failed) | 253 cases, 8 failed | 253 cases, 8 failed (see below) | 253 cases, 8 failed |
+    | `@kama/gpu`'s tests (stopgap: 74, 0 failed) | 74, 1 failed | 74, 1 failed | no WebGPU adapter, then an abort |
+    | `@kama/gpu`'s clear, 60 frames | 60 frames, 0 errors | 60 frames, 0 errors | no WebGPU adapter, an abort |
+
+    - **Firefox runs this package's cases as Chromium does:** the same 8 failures in all three, and no other.
+    - **The 8 are two causes, neither Firefox's:**
+      - 7 cases are written for a device scale of 1.5, "so pixel sizes are not CSS sizes", which the stopgap sets
+        (`--force-device-scale-factor`). `kama run` opens at the display's own scale, 1 headless, where pixels are CSS
+        pixels; it takes no browser flags and no scale.
+      - The trusted-input steps (14 requests, `tests/src/web.kama`) wait out 3,600 frames for a driver, and the 11 cases
+        after the first never run. Trusted input is kama's KR-378, filed and not built.
+    - **`@kama/gpu`'s one failure is the scale too:** its too-wide canvas is 6000 CSS pixels, past 8192 only at 1.5.
+    - **WebGPU needs no flag under `kama run`:** headless Edge and Chrome for Testing give an adapter without
+      `--enable-unsafe-webgpu`.
+    - **Headless Firefox 160 gives no WebGPU adapter here:** `navigator.gpu` is there and `requestAdapter()` answers null,
+      with the default prefs and with four sets that force WebGPU, its blocklist off, the GPU process and hardware
+      compositing. A visible Firefox was not tried: its window would take the focus.
+    - **Chrome for Testing unzipped into `~/browsers` never loads the page under `kama run`:** in a full headless session
+      its sandboxed network service crashes at start-up, and the first navigation, the page `kama run` names on the command
+      line, is never requested. The folder was given the four grants an installed Edge's folder carries (`~/browsers/
+      README.md`), which ended Chrome's "Sandbox cannot access executable" error but not the crash; with
+      `--disable-features=NetworkServiceSandbox` it runs as Edge does, and installed Edge and Brave run the page in 1 to
+      2 s. The cause is not found. The driver never saw it: it opens `about:blank` and navigates later.
+    - **Time:** about the same. `@kama/gpu`'s tests take 7.4 to 8.4 s under `kama run` with its build, and 6.8 to 7.1 s
+      under the stopgap without one. This package's take 65 to 224 s under `kama run`, all but a few waiting out the
+      trusted-input steps, against 8.5 s.
 
     **Decided by the owner on 2026-11-12 (kyoten's sixteenth session), each as recommended,** asked in the chat after
     the measurement ("Sounds good as recommended we can wait on kama for that"; then "I take your recommendation" for
@@ -694,6 +723,20 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
        reproduced; `kama run` takes the browsers that run it. Chrome for Testing's silent hang is kyoten's KY-53.
     3. **A device scale under `kama run` is kama's** (kyoten's KY-52, filed): until it lands, the scale cases run in
        the driver's leg alone.
+
+    **Built on 2026-11-12 (kyoten's sixteenth session), test-first, every leg green:**
+    - **The program knows whether the driver runs it:** `driven()` reads `--driver`, which the driver passes through
+      the page's query (`windowtests.html?arg=--driver`; the page reads `?arg=`, which `kama run -- <args>` replaces).
+      Without it, `scaledCheck` skips each of the 7 scale cases by name (KY-52), and the stepped run ends after step 3's
+      own checks, skipping the trusted-input steps (KR-378) and the one-axis canvas's hold, which runs away only at a
+      ratio other than 1 (KY-52). Red first: under `kama run`, 8 of 253 failed.
+    - **The leg** (`tools/test.sh`, `tools/browsers.mjs`, the same file as `@kama/gpu`'s): `kama run` in Edge and
+      Firefox 160, 245 cases, 0 failed and 9 named skips in each, bounded by `timeout 300`; the driver in Chrome for
+      Testing, 264 cases. **The driver's run must skip nothing that waits on the driver:** `tools/test.sh` fails it if
+      it prints one, since a program that missed `--driver` would otherwise pass by skipping.
+    - **Mutations:** 6 of 6 caught, run as the leg runs: `driven()` never and always true, `scaledCheck` always skipping
+      and always checking, the stepped run's test inverted, and the page passing no arguments. Four are caught only by
+      the driver's guard, which is why it is there.
 
 
 - **This package's own documents,** above: the SPEC, the ROADMAP and its detail, and the CHANGELOG.

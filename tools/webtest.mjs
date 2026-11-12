@@ -1,13 +1,14 @@
-// tools/webtest.mjs — @kama/window's browser leg (AGENTS.window.md item 8, decision 10): the tests program, built for
-// the web with its own page, run in a headless Chromium (Edge or Chrome) driven over the DevTools protocol. node 22 or
-// later, for its built-in WebSocket; no npm packages.
+// tools/webtest.mjs — @kama/window's browser leg through the driver (AGENTS.window.md item 8, decision 10, and item 10):
+// the tests program, built for the web with its own page, run in a headless Chromium driven over the DevTools protocol,
+// which passes `--driver` (`?arg=--driver`), sets a device scale of 1.5 and performs trusted input. node 22 or later,
+// for its built-in WebSocket; no npm packages.
 //
-//   node tools/webtest.mjs <dir> <page.html> [--browser <path>] [--timeout <seconds>]
-//   node tools/webtest.mjs --list         # every browser the gate runs in, one a line, or exit 3 when there is none
+// STOPGAP: every other browser runs the leg under `kama run --target WASM` (tools/test.sh), skipping what needs this
+// driver. It stays for trusted input until `kama run` gives it (kama's KR-378), for a device scale (kyoten's KY-52), and
+// for the pinned Chrome for Testing, which never loads a page under `kama run` (kyoten's KY-53).
 //
-// The browsers (kyoten's GPU-3, decision 5: pinned, and every one present): $KAMA_BROWSER alone when it is set;
-// otherwise the newest Chrome for Testing pinned under $KAMA_BROWSERS (default ~/browsers, its chrome-<version>/
-// folders), then Edge and Chrome as installed. Firefox speaks WebDriver BiDi, not the DevTools protocol (WIN-18).
+//   node tools/webtest.mjs <dir> <page.html[?query]> [--browser <path>] [--timeout <seconds>]
+//   node tools/webtest.mjs --list         # the browsers it runs in (tools/browsers.mjs driver), or exit 3 when none
 //
 // It serves <dir> on 127.0.0.1, opens <page.html> in a throwaway profile at a device scale of 1.5 (so pixel sizes are
 // not CSS sizes), and prints the browser's name and the page's console as it comes. The run ends at the program's summary line
@@ -30,69 +31,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { driverBrowsers } from './browsers.mjs';
 
 const SCALE = 1.5;
-
-// "157.0.8103.50" sorts after "157.0.812.1": compare each number.
-function newer(a, b) {
-    const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
-    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-        if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
-    }
-    return 0;
-}
-
-// The newest Chrome for Testing pinned under $KAMA_BROWSERS (~/browsers). Its headless shell has no WebGPU adapter
-// (measured 2026-11-11), so the full browser runs, headless.
-function pinned() {
-    const dir = process.env.KAMA_BROWSERS || path.join(os.homedir(), 'browsers');
-    if (!fs.existsSync(dir)) return [];
-    const inner = process.platform === 'win32' ? 'chrome-win64/chrome.exe'
-        : process.platform === 'darwin' ? 'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing'
-        : 'chrome-linux64/chrome';
-    const found = fs.readdirSync(dir)
-        .map(n => /^chrome-(\d+(?:\.\d+)+)$/.exec(n))
-        .filter(m => m && fs.existsSync(path.join(dir, m[0], inner)))
-        .sort((x, y) => newer(x[1], y[1]));
-    return found.length ? [path.join(dir, found[found.length - 1][0], inner)] : [];
-}
-
-// Edge and Chrome as installed, one of each.
-function installed() {
-    const local = process.env.LOCALAPPDATA || '';
-    const candidates = process.platform === 'win32' ? [
-        'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-        'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-        'C:/Program Files/Google/Chrome/Application/chrome.exe',
-        path.join(local, 'Google/Chrome/Application/chrome.exe'),
-    ] : process.platform === 'darwin' ? [
-        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    ] : [];
-    const out = [];
-    const seen = new Set();
-    for (const c of candidates) {
-        if (!fs.existsSync(c)) continue;
-        const kind = /edge/i.test(c) ? 'edge' : 'chrome';
-        if (seen.has(kind)) continue;
-        seen.add(kind);
-        out.push(c);
-    }
-    if (process.platform !== 'win32' && process.platform !== 'darwin') {
-        for (const name of ['microsoft-edge', 'google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
-            const kind = /edge/.test(name) ? 'edge' : 'chrome';
-            if (seen.has(kind)) continue;
-            const r = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' });
-            if (r.status === 0 && r.stdout.trim()) { seen.add(kind); out.push(r.stdout.trim()); }
-        }
-    }
-    return out;
-}
-
-function browsers() {
-    if (process.env.KAMA_BROWSER) return [process.env.KAMA_BROWSER];
-    return [...pinned(), ...installed()];
-}
 
 const TYPES = {
     '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.data': 'application/octet-stream',
@@ -165,8 +106,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 async function main(argv) {
     if (argv[0] === '--list') {
-        const found = browsers();
-        if (!found.length) { console.error('webtest: no Chromium browser (set KAMA_BROWSER, or pin one under ~/browsers)'); return 3; }
+        const found = driverBrowsers();
+        if (!found.length) { console.error('webtest: no Chrome for Testing pinned under ~/browsers (or set KAMA_BROWSER)'); return 3; }
         for (const b of found) console.log(b);
         return 0;
     }
@@ -176,8 +117,8 @@ async function main(argv) {
     if (ti >= 0) limit = Number(argv[ti + 1]);
     const bi = argv.indexOf('--browser');
     if (!dir || !page) { console.error('usage: node tools/webtest.mjs <dir> <page.html> [--browser <path>] [--timeout <seconds>]'); return 2; }
-    const browserPath = bi >= 0 ? argv[bi + 1] : browsers()[0];
-    if (!browserPath) { console.error('webtest: no Chromium browser (set KAMA_BROWSER, or pin one under ~/browsers)'); return 3; }
+    const browserPath = bi >= 0 ? argv[bi + 1] : driverBrowsers()[0];
+    if (!browserPath) { console.error('webtest: no Chrome for Testing pinned under ~/browsers (or set KAMA_BROWSER)'); return 3; }
 
     const { server, port } = await serve(dir);
     const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'kama-window-webtest-'));
