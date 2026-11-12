@@ -32,11 +32,15 @@ typedef struct pad_view {
     int32_t known;      // the consumer has seen it connect, and not disconnect: the ring keeps a slot for its disconnect
     uint32_t held;      // a bit per button the consumer has seen go down and not up
     int32_t stale;      // released since its last sample: it reads neutral until the next one
+    int32_t rumbling;   // the rumbles this window started on it, stopped when its pads close: 1 dual, 2 trigger
 } pad_view;
 
 // A button is pressed at 30 of 255 of its travel or more, on every backend (WIN-4, decision 2a): XInput's trigger
 // threshold, and Chromium's for an XInput pad.
 #define PAD_PRESSED_AT (30.0f / 255.0f)
+
+struct winseam_window;
+static void stop_rumbles(struct winseam_window *w);   // the system's pads, below
 
 struct winseam_window {
     winseam_event ring[RING];
@@ -266,6 +270,7 @@ static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s) {
         release_pad(w, slot);
         v->stale = 0;
         v->known = 0;
+        v->rumbling = 0;
         w->held_count -= 1;
         pad_record(&e, WINSEAM_PAD_DISCONNECTED, slot, 0);
         store(w, &e, w->held_count, 1);
@@ -324,7 +329,7 @@ void winseam_pad_read(winseam_window *w, int32_t slot, winseam_pad *into) {
 
 void winseam_set_pads_when_unfocused(winseam_window *w, int32_t on) {
     w->pads_unfocused = on ? 1 : 0;
-    if (!pads_open(w)) release_pads(w);
+    if (!pads_open(w)) { stop_rumbles(w); release_pads(w); }
 }
 
 // A posted pad event moves the slot's pad as the system would: a down presses its button fully, an up lets it go, a
@@ -470,6 +475,7 @@ static void take(winseam_window *w, const winseam_event *e) {
     }
     if (e->kind == WINSEAM_FOCUS) {
         w->focused = e->a ? 1 : 0;
+        if (!w->pads_unfocused && !e->a) stop_rumbles(w);
         release_held(w, !w->pads_unfocused);
         // Losing the focus while locked gives the pointer back, as a browser does on blur; clicking in locks it again.
         if (!e->a && w->cursor_mode == 2) winseam_set_cursor(w, 0);
@@ -536,6 +542,10 @@ typedef struct system_pad {
     char id[128];
     int32_t vendor;
     int32_t product;
+    int32_t caps;          // WINSEAM_PAD_RUMBLE, WINSEAM_PAD_TRIGGER_RUMBLE
+    float rumble[4];       // a test's table: the last rumble asked for, strong, weak, left, right
+    int32_t rumble_ms;
+    int32_t rumbles;       // a test's table: how many were asked for since the slot was set
 } system_pad;
 
 static system_pad g_system[WINSEAM_PADS];
@@ -559,8 +569,10 @@ static void copy_string(char *dst, size_t capacity, const char *src) {
 }
 
 static void system_slot(int32_t slot, const winseam_pad *sample, const char *name, int32_t vendor, int32_t product,
-                        const char *serial, const char *id) {
+                        const char *serial, const char *id, int32_t caps) {
     system_pad *p = &g_system[slot];
+    memset(p, 0, sizeof *p);
+    p->caps = caps;
     p->sample = *sample;
     copy_string(p->name, sizeof p->name, name);
     copy_string(p->serial, sizeof p->serial, serial);
@@ -582,7 +594,7 @@ void winseam_pads_from_system(int32_t on) {
 }
 
 void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, const float *axes, const char *name,
-                        int32_t vendor, int32_t product, const char *serial, const char *id) {
+                        int32_t vendor, int32_t product, const char *serial, const char *id, int32_t caps) {
     if (!slot_ok(slot)) return;
     winseam_pad s;
     memset(&s, 0, sizeof s);
@@ -590,10 +602,18 @@ void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, c
         s.connected = 1;
         memcpy(s.buttons, buttons, sizeof s.buttons);
         memcpy(s.axes, axes, sizeof s.axes);
-        system_slot(slot, &s, name, vendor, product, serial, id);
+        system_slot(slot, &s, name, vendor, product, serial, id, caps);
     } else {
-        system_slot(slot, &s, "", 0, 0, "", "");
+        system_slot(slot, &s, "", 0, 0, "", "", 0);
     }
+}
+
+int32_t winseam_system_pad_rumbled(int32_t slot, float *motors, int32_t *milliseconds) {
+    if (!slot_ok(slot)) return 0;
+    const system_pad *p = &g_system[slot];
+    memcpy(motors, p->rumble, sizeof p->rumble);
+    *milliseconds = p->rumble_ms;
+    return p->rumbles;
 }
 
 // The system's word on the pad in `slot`, when `w` is a system window that knows a pad there.
@@ -615,7 +635,54 @@ int32_t winseam_pad_text(winseam_window *w, int32_t slot, int32_t which, uint8_t
 int32_t winseam_pad_number(winseam_window *w, int32_t slot, int32_t which) {
     const system_pad *p = info_of(w, slot);
     if (p == NULL) return -1;
-    return which == 0 ? p->vendor : p->product;
+    return which == 0 ? p->vendor : which == 1 ? p->product : p->caps;
+}
+
+static float unit(float v) { return v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+
+static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers);   // natively or on the web
+
+// A rumble into the system's slot: a test's table records it; the system plays it. Refused for a motor the pad has not.
+static int rumble_slot(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
+    system_pad *p = &g_system[slot];
+    if ((p->caps & (triggers ? WINSEAM_PAD_TRIGGER_RUMBLE : WINSEAM_PAD_RUMBLE)) == 0) return 0;
+    if (!g_from_system) {
+        p->rumble[triggers ? 2 : 0] = a;
+        p->rumble[triggers ? 3 : 1] = b;
+        p->rumble_ms = milliseconds;
+        p->rumbles += 1;
+        return 1;
+    }
+    return system_rumble(slot, a, b, milliseconds, triggers);
+}
+
+static int32_t pad_rumble(winseam_window *w, int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
+    if (!slot_ok(slot) || winseam_headless_p(w) || !w->pads[slot].known || !pads_open(w)) return 0;
+    if (milliseconds < 0) milliseconds = 0;
+    a = unit(a); b = unit(b);
+    if (!rumble_slot(slot, a, b, milliseconds, triggers)) return 0;
+    int32_t bit = triggers ? 2 : 1;
+    if ((a > 0.0f || b > 0.0f) && milliseconds > 0) w->pads[slot].rumbling |= bit;
+    else w->pads[slot].rumbling &= ~bit;
+    return 1;
+}
+
+int32_t winseam_pad_rumble(winseam_window *w, int32_t slot, float strong, float weak, int32_t milliseconds) {
+    return pad_rumble(w, slot, strong, weak, milliseconds, 0);
+}
+
+int32_t winseam_pad_rumble_triggers(winseam_window *w, int32_t slot, float left, float right, int32_t milliseconds) {
+    return pad_rumble(w, slot, left, right, milliseconds, 1);
+}
+
+// Each rumble the window started, stopped: its pads have closed (decision 6).
+static void stop_rumbles(winseam_window *w) {
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        pad_view *v = &w->pads[slot];
+        if (v->rumbling & 1) rumble_slot(slot, 0.0f, 0.0f, 0, 0);
+        if (v->rumbling & 2) rumble_slot(slot, 0.0f, 0.0f, 0, 1);
+        v->rumbling = 0;
+    }
 }
 
 #ifndef __EMSCRIPTEN__
@@ -674,8 +741,11 @@ static void sdl_add(SDL_JoystickID id) {
     winseam_pad s;
     memset(&s, 0, sizeof s);
     s.connected = 1;
+    SDL_PropertiesID props = SDL_GetGamepadProperties(g);
+    int32_t caps = (SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false) ? WINSEAM_PAD_RUMBLE : 0) |
+                   (SDL_GetBooleanProperty(props, SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false) ? WINSEAM_PAD_TRIGGER_RUMBLE : 0);
     system_slot(free_slot, &s, SDL_GetGamepadName(g), SDL_GetGamepadVendor(g), SDL_GetGamepadProduct(g),
-                SDL_GetGamepadSerial(g), SDL_GetGamepadPath(g));
+                SDL_GetGamepadSerial(g), SDL_GetGamepadPath(g), caps);
 }
 
 static void sdl_remove(SDL_JoystickID id) {
@@ -719,6 +789,16 @@ static void sdl_sample(SDL_Gamepad *g, winseam_pad *s) {
     s->axes[3] = sdl_axis(SDL_GetGamepadAxis(g, SDL_GAMEPAD_AXIS_RIGHTY));
 }
 
+// SDL's 0 to 65535, from 0 to 1.
+static Uint16 sdl_motor(float v) { return (Uint16)(v * 65535.0f + 0.5f); }
+
+static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
+    SDL_Gamepad *g = g_sdl_pads[slot];
+    if (g == NULL) return 0;
+    Uint32 ms = (Uint32)milliseconds;
+    return triggers ? SDL_RumbleGamepadTriggers(g, sdl_motor(a), sdl_motor(b), ms) : SDL_RumbleGamepad(g, sdl_motor(a), sdl_motor(b), ms);
+}
+
 // SDL's arrivals and removals, then each pad's state, into the table.
 static void read_system_pads(void) {
     if (!g_sdl || !g_from_system) return;
@@ -736,6 +816,10 @@ static void read_system_pads(void) {
 static void sdl_start(void) { }
 static void sdl_stop(void) { }
 static void read_system_pads(void) { }
+static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
+    (void)slot; (void)a; (void)b; (void)milliseconds; (void)triggers;
+    return 0;
+}
 #endif
 
 static winseam_window *of(GLFWwindow *g) { return (winseam_window *)glfwGetWindowUserPointer(g); }
@@ -1183,6 +1267,12 @@ void winseam_set_cursor(winseam_window *w, int32_t mode) {
         return;
     }
     if ((mode == 2) != (was == 2)) push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0);
+}
+
+// A rumble on the page's pads: part C's (WIN-4); none yet.
+static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
+    (void)slot; (void)a; (void)b; (void)milliseconds; (void)triggers;
+    return 0;
 }
 
 int32_t winseam_native_kind(winseam_window *w) { return w->selector != NULL ? 5 : 0; }

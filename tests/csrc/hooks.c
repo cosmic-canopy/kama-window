@@ -41,7 +41,24 @@ int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height) {
 // SDL's virtual pads, each held open here so its state can be set.
 #include <SDL3/SDL.h>
 #define VIRTUAL_PADS 8
-static struct { SDL_JoystickID id; SDL_Joystick *joystick; } g_virtual[VIRTUAL_PADS];
+static struct {
+    SDL_JoystickID id;
+    SDL_Joystick *joystick;
+    int32_t rumbles;                     // how many rumble requests SDL handed the pad, dual and trigger
+    int32_t low, high, left, right;      // the last ones' motors, as SDL handed them, 0 to 65535
+} g_virtual[VIRTUAL_PADS];
+
+static bool SDLCALL virtual_rumble(void *userdata, Uint16 low, Uint16 high) {
+    int i = (int)(intptr_t)userdata;
+    g_virtual[i].rumbles += 1; g_virtual[i].low = low; g_virtual[i].high = high;
+    return true;
+}
+
+static bool SDLCALL virtual_rumble_triggers(void *userdata, Uint16 left, Uint16 right) {
+    int i = (int)(intptr_t)userdata;
+    g_virtual[i].rumbles += 1; g_virtual[i].left = left; g_virtual[i].right = right;
+    return true;
+}
 static Uint16 g_virtual_product = 0x7000;   // each pad its own product, so SDL keeps each one's name: it keys a pad's mapping, name and all, by vendor and product
 
 static SDL_Joystick *virtual_of(uint32_t id) {
@@ -49,7 +66,7 @@ static SDL_Joystick *virtual_of(uint32_t id) {
     return NULL;
 }
 
-uint32_t windowtests_virtual_pad(const char *name) {
+uint32_t windowtests_virtual_pad(const char *name, int32_t trigger_motors) {
     if (!SDL_WasInit(SDL_INIT_GAMEPAD)) return 0;
     for (int i = 0; i < VIRTUAL_PADS; i++) {
         if (g_virtual[i].joystick != NULL) continue;
@@ -61,6 +78,11 @@ uint32_t windowtests_virtual_pad(const char *name) {
         desc.name = name;
         desc.vendor_id = 0x1209;
         desc.product_id = g_virtual_product++;
+        desc.Rumble = virtual_rumble;
+        desc.RumbleTriggers = trigger_motors ? virtual_rumble_triggers : NULL;
+        desc.userdata = (void *)(intptr_t)i;
+        g_virtual[i].rumbles = 0;
+        g_virtual[i].low = g_virtual[i].high = g_virtual[i].left = g_virtual[i].right = 0;
         SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
         if (id == 0) return 0;
         g_virtual[i].joystick = SDL_OpenJoystick(id);
@@ -83,6 +105,15 @@ int32_t windowtests_virtual_axis(uint32_t id, int32_t axis, int32_t value) {
 
 int32_t windowtests_sdl_running(void) { return SDL_WasInit(SDL_INIT_GAMEPAD) != 0 ? 1 : 0; }
 
+int32_t windowtests_virtual_rumbled(uint32_t id, int32_t *low, int32_t *high, int32_t *left, int32_t *right) {
+    for (int i = 0; i < VIRTUAL_PADS; i++) {
+        if (g_virtual[i].joystick == NULL || g_virtual[i].id != id) continue;
+        *low = g_virtual[i].low; *high = g_virtual[i].high; *left = g_virtual[i].left; *right = g_virtual[i].right;
+        return g_virtual[i].rumbles;
+    }
+    return -1;
+}
+
 void windowtests_virtual_detach(uint32_t id) {
     for (int i = 0; i < VIRTUAL_PADS; i++) {
         if (g_virtual[i].joystick == NULL || g_virtual[i].id != id) continue;
@@ -101,11 +132,14 @@ void windowtests_shown_next(int32_t shown) { (void)shown; }
 int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up) { (void)hwnd; (void)vk; (void)up; return -1; }
 int32_t windowtests_send_focus(void *hwnd, int32_t focused) { (void)hwnd; (void)focused; return -1; }
 int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height) { (void)hwnd; (void)width; (void)height; return -1; }
-uint32_t windowtests_virtual_pad(const char *name) { (void)name; return 0; }
+uint32_t windowtests_virtual_pad(const char *name, int32_t trigger_motors) { (void)name; (void)trigger_motors; return 0; }
 int32_t windowtests_virtual_button(uint32_t id, int32_t button, int32_t down) { (void)id; (void)button; (void)down; return 0; }
 int32_t windowtests_virtual_axis(uint32_t id, int32_t axis, int32_t value) { (void)id; (void)axis; (void)value; return 0; }
 void windowtests_virtual_detach(uint32_t id) { (void)id; }
 int32_t windowtests_sdl_running(void) { return -1; }
+int32_t windowtests_virtual_rumbled(uint32_t id, int32_t *low, int32_t *high, int32_t *left, int32_t *right) {
+    (void)id; (void)low; (void)high; (void)left; (void)right; return -1;
+}
 #endif
 
 int32_t windowtests_cstr_is(const void *p, const char *s) { return p != NULL && strcmp((const char *)p, s) == 0; }

@@ -8,7 +8,7 @@ import {
     core::env::envOr,
     Tally, drained, expectDrained, quietly,
     window::Window, window::WindowError, window::WindowOptions, window::Gamepad, window::PadButton, window::PadAxis,
-    window::PadInfo,
+    window::PadInfo, window::NativeWindow,
 };
 export { systemPadCases, noSystemPads };
 
@@ -16,16 +16,20 @@ extern "winseam.h";
 extern fn void winseam_pads_from_system(int32 on);
 extern fn void winseam_system_pad(int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
                                   UnsafeConstPtr<float32> axes, UnsafeConstPtr<cchar> name, int32 vendor, int32 product,
-                                  UnsafeConstPtr<cchar> serial, UnsafeConstPtr<cchar> id);
+                                  UnsafeConstPtr<cchar> serial, UnsafeConstPtr<cchar> id, int32 caps);
+extern fn int32 winseam_system_pad_rumbled(int32 slot, UnsafePtr<float32> motors, UnsafePtr<int32> milliseconds);
 
 extern "hooks.h";
 extern fn int32 windowtests_win32();
-extern fn uint32 windowtests_virtual_pad(UnsafeConstPtr<cchar> name);
+extern fn uint32 windowtests_virtual_pad(UnsafeConstPtr<cchar> name, int32 trigger_motors);
 extern fn int32 windowtests_virtual_button(uint32 id, int32 button, int32 down);
 extern fn int32 windowtests_virtual_axis(uint32 id, int32 axis, int32 value);
 extern fn void windowtests_virtual_detach(uint32 id);
 extern fn UnsafePtr windowtests_sigint_handler();
 extern fn int32 windowtests_sdl_running();
+extern fn int32 windowtests_virtual_rumbled(uint32 id, UnsafePtr<int32> low, UnsafePtr<int32> high, UnsafePtr<int32> left,
+                                            UnsafePtr<int32> right);
+extern fn int32 windowtests_send_focus(UnsafePtr hwnd, int32 focused);
 
 fn void check(ref Tally t, const ref string name, bool ok, const ref string why) {
     if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
@@ -39,13 +43,14 @@ fn WindowOptions padWindow() {
     return o;
 }
 
-// The system's slot `slot` set as the system would, from `pad`.
+// The system's slot `slot` set as the system would, from `pad`; `caps` what it can do: 1 rumble, 2 trigger rumble.
 unsafe fn void systemPad(int32 slot, const ref Gamepad pad, const ref string name, int32 vendor, int32 product,
-                         const ref string serial, const ref string id) {
+                         const ref string serial, const ref string id, int32 caps) {
     int32 connected = 0;
     if (pad.connected) { connected = 1; }
     winseam_system_pad(slot: slot, connected: connected, buttons: addr(of: pad.buttons[0]), axes: addr(of: pad.axes[0]),
-                       name: name.cstr(), vendor: vendor, product: product, serial: serial.cstr(), id: id.cstr());
+                       name: name.cstr(), vendor: vendor, product: product, serial: serial.cstr(), id: id.cstr(),
+                       caps: caps);
 }
 
 fn Gamepad pressing(PadButton button) {
@@ -92,7 +97,7 @@ unsafe fn void replacedRead(ref Tally t) {
 
                     Gamepad south = pressing(button: PadButton::South);
                     systemPad(slot: 0, pad: south, name: "a test pad", vendor: 1118, product: 2834, serial: "S-1",
-                              id: "ID-1");
+                              id: "ID-1", caps: 0);
                     a.pump();
                     expectDrained(t: t, w: a, name: "a pump reads the system's pads into its window",
                                   want: "PadConnected 0; PadButtonDown 0 0");
@@ -112,7 +117,7 @@ unsafe fn void replacedRead(ref Tally t) {
                           ok: postedInfo == "none", why: "it is `${postedInfo}`");
 
                     Gamepad gone = Gamepad.disconnected();
-                    systemPad(slot: 0, pad: gone, name: "", vendor: 0, product: 0, serial: "", id: "");
+                    systemPad(slot: 0, pad: gone, name: "", vendor: 0, product: 0, serial: "", id: "", caps: 0);
                     b.pump();
                     expectDrained(t: t, w: a, name: "a system pad's disconnect reaches every window",
                                   want: "PadButtonUp 0 0; PadDisconnected 0");
@@ -123,7 +128,8 @@ unsafe fn void replacedRead(ref Tally t) {
                           why: "it is `${goneInfo}`");
 
                     Gamepad rest = Gamepad.neutral();
-                    systemPad(slot: 3, pad: rest, name: "a second pad", vendor: 0, product: 0, serial: "", id: "ID-3");
+                    systemPad(slot: 3, pad: rest, name: "a second pad", vendor: 0, product: 0, serial: "", id: "ID-3",
+                              caps: 0);
                     a.pump();
                     ignored = drained(w: a);
                     Result<Window, WindowError> openedC = Window.openWith(title: "@kama/window pads C", width: 160,
@@ -155,6 +161,95 @@ unsafe fn void replacedRead(ref Tally t) {
 
 @compileFor(ARCH_WASM32)
 unsafe fn void replacedRead(ref Tally t) { }
+
+// What the system's slot was last asked to rumble: "strong weak left right milliseconds", "" when never.
+unsafe fn string rumbledText(int32 slot) {
+    InlineArray<float32>#(4) motors = [0.0; 4];
+    int32 ms = 0;
+    int32 asked = winseam_system_pad_rumbled(slot: slot, motors: addr(of: motors[0]), milliseconds: addr(of: ms));
+    if (asked == 0) { return ""; }
+    float32 strong = motors[0];
+    float32 weak = motors[1];
+    float32 left = motors[2];
+    float32 right = motors[3];
+    return "${strong} ${weak} ${left} ${right} ${ms}";
+}
+
+// Rumble (decision 7), through the replaced read: a headless window has none; an unfocused window's is refused while
+// pads are not read in the background (decision 5); a pad without a motor refuses its rumble; values are clamped to 0
+// to 1; and a focus loss stops what the window started. The focus is given and taken by window messages, so the
+// window never takes the real focus.
+@compileFor(!ARCH_WASM32)
+unsafe fn void rumbleCases(ref Tally t) {
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window rumble", width: 160, height: 100,
+                                                         options: quietly());
+    match (give opened) {
+        case Err(error: e): { string why = e.message(); t.verdict(name: "rumble: a window opens", why: why); }
+        case Ok(value: w): {
+            Gamepad rest = Gamepad.neutral();
+            systemPad(slot: 0, pad: rest, name: "a rumbling pad", vendor: 0, product: 0, serial: "", id: "R-0", caps: 1);
+            systemPad(slot: 1, pad: rest, name: "a pad with trigger motors", vendor: 0, product: 0, serial: "",
+                      id: "R-1", caps: 3);
+            w.pump();
+            string ignored = drained(w: w);
+            Window h = Window.headless(width: 64, height: 64);
+            h.postPad(slot: 0, pad: Gamepad.neutral());
+            check(t: t, name: "a headless window rumbles nothing, though the system has a pad with motors in the slot",
+                  ok: !h.rumble(slot: 0, strong: 1.0, weak: 1.0, milliseconds: 100) && rumbledText(slot: 0) == "",
+                  why: "it took one");
+            check(t: t, name: "unfocused, with pads not read in the background, a rumble is refused",
+                  ok: !w.rumble(slot: 0, strong: 1.0, weak: 0.5, milliseconds: 200) && rumbledText(slot: 0) == "",
+                  why: "it was taken");
+            NativeWindow n = w.nativeHandle();
+            UnsafePtr hwnd = n.window();
+            windowtests_send_focus(hwnd: hwnd, focused: 1);
+            w.pump();
+            ignored = drained(w: w);
+            bool took = w.rumble(slot: 0, strong: 1.0, weak: 0.25, milliseconds: 300);
+            string first = rumbledText(slot: 0);
+            check(t: t, name: "focused, a rumble is taken, its motors and length as asked", ok: took && first == "1 0.25 0 0 300",
+                  why: "took ${took}, `${first}`");
+            took = w.rumble(slot: 0, strong: 2.0, weak: -1.0, milliseconds: 100);
+            string clamped = rumbledText(slot: 0);
+            check(t: t, name: "a rumble's strengths are clamped to 0 to 1", ok: took && clamped == "1 0 0 0 100",
+                  why: "`${clamped}`");
+            check(t: t, name: "a pad without trigger motors refuses a trigger rumble",
+                  ok: !w.rumbleTriggers(slot: 0, left: 1.0, right: 1.0, milliseconds: 100), why: "it took one");
+            took = w.rumbleTriggers(slot: 1, left: 0.5, right: 0.75, milliseconds: 250);
+            string triggers = rumbledText(slot: 1);
+            check(t: t, name: "a pad with trigger motors takes a trigger rumble", ok: took && triggers == "0 0 0.5 0.75 250",
+                  why: "took ${took}, `${triggers}`");
+            check(t: t, name: "an empty slot rumbles nothing", ok: !w.rumble(slot: 5, strong: 1.0, weak: 1.0, milliseconds: 100),
+                  why: "it took one");
+            Optional<PadInfo> plain = w.padInfo(slot: 0);
+            Optional<PadInfo> full = w.padInfo(slot: 1);
+            bool plainCaps = match (plain) { case Some(value: i): i.rumble() && !i.triggerRumble(); case None: false; };
+            bool fullCaps = match (full) { case Some(value: i): i.rumble() && i.triggerRumble(); case None: false; };
+            check(t: t, name: "a pad's info says which rumble it has", ok: plainCaps && fullCaps, why: "it does not");
+
+            windowtests_send_focus(hwnd: hwnd, focused: 0);
+            w.pump();
+            string stopped = rumbledText(slot: 0);
+            string stoppedTriggers = rumbledText(slot: 1);
+            check(t: t, name: "a focus loss stops each rumble the window started",
+                  ok: stopped == "0 0 0 0 0" && stoppedTriggers == "0 0 0 0 0",
+                  why: "slot 0 `${stopped}`, slot 1 `${stoppedTriggers}`");
+
+            w.setPadsWhenUnfocused(on: true);
+            took = w.rumble(slot: 0, strong: 0.5, weak: 0.5, milliseconds: 400);
+            string behind = rumbledText(slot: 0);
+            check(t: t, name: "unfocused, with pads read in the background, a rumble is taken",
+                  ok: took && behind == "0.5 0.5 0 0 400", why: "took ${took}, `${behind}`");
+            w.setPadsWhenUnfocused(on: false);
+            string offAgain = rumbledText(slot: 0);
+            check(t: t, name: "turned off while unfocused, background reads stop the window's rumbles too",
+                  ok: offAgain == "0 0 0 0 0", why: "`${offAgain}`");
+        }
+    };
+}
+
+@compileFor(ARCH_WASM32)
+unsafe fn void rumbleCases(ref Tally t) { }
 
 // The slot whose pad SDL names `name`, or -1.
 unsafe fn int32 slotNamed(const ref Window w, const ref string name) {
@@ -190,7 +285,7 @@ unsafe fn void virtualPad(ref Tally t) {
             w.pump();
             string before = drained(w: w);
             string name = "kama-window virtual pad";
-            uint32 id = windowtests_virtual_pad(name: name.cstr());
+            uint32 id = windowtests_virtual_pad(name: name.cstr(), trigger_motors: 1);
             check(t: t, name: "SDL attaches a virtual pad once a system window is open", ok: id != 0,
                   why: "SDL refused, or was not started");
             if (id == 0) { return; }
@@ -223,6 +318,27 @@ unsafe fn void virtualPad(ref Tally t) {
                       && g.axis(axis: PadAxis::RightX) == 0.0,
                   why: "the trigger or a stick read otherwise");
 
+            Optional<PadInfo> sdlInfo = w.padInfo(slot: s);
+            bool both = match (sdlInfo) { case Some(value: i): i.rumble() && i.triggerRumble(); case None: false; };
+            check(t: t, name: "SDL's pad says it has rumble and trigger rumble, as SDL says", ok: both,
+                  why: "it does not");
+            bool took = w.rumble(slot: s, strong: 1.0, weak: 0.25, milliseconds: 100);
+            int32 low = 0;
+            int32 high = 0;
+            int32 left = 0;
+            int32 right = 0;
+            int32 asked = windowtests_virtual_rumbled(id: id, low: addr(of: low), high: addr(of: high), left: addr(of: left),
+                                                      right: addr(of: right));
+            check(t: t, name: "a rumble reaches SDL's pad: strong the low-frequency motor, weak the high, 0 to 65535",
+                  ok: took && asked == 1 && low == 65535 && high == 16384,
+                  why: "took ${took}, ${asked} asked, low ${low}, high ${high}");
+            bool tookTriggers = w.rumbleTriggers(slot: s, left: 0.5, right: 1.0, milliseconds: 100);
+            asked = windowtests_virtual_rumbled(id: id, low: addr(of: low), high: addr(of: high), left: addr(of: left),
+                                                right: addr(of: right));
+            check(t: t, name: "a trigger rumble reaches SDL's pad, left and right",
+                  ok: tookTriggers && asked == 2 && left == 32768 && right == 65535,
+                  why: "took ${tookTriggers}, ${asked} asked, left ${left}, right ${right}");
+
             windowtests_virtual_detach(id: id);
             w.pump();
             string gone = drained(w: w);
@@ -234,19 +350,22 @@ unsafe fn void virtualPad(ref Tally t) {
             string nameA = "kama-window pad A";
             string nameB = "kama-window pad B";
             string nameC = "kama-window pad C";
-            uint32 a = windowtests_virtual_pad(name: nameA.cstr());
+            uint32 a = windowtests_virtual_pad(name: nameA.cstr(), trigger_motors: 1);
             w.pump();
-            uint32 b = windowtests_virtual_pad(name: nameB.cstr());
+            uint32 b = windowtests_virtual_pad(name: nameB.cstr(), trigger_motors: 0);
             w.pump();
             int32 sa = slotNamed(w: w, name: nameA);
             int32 sb = slotNamed(w: w, name: nameB);
             windowtests_virtual_detach(id: a);
             w.pump();
-            uint32 c = windowtests_virtual_pad(name: nameC.cstr());
+            uint32 c = windowtests_virtual_pad(name: nameC.cstr(), trigger_motors: 1);
             w.pump();
             int32 sc = slotNamed(w: w, name: nameC);
             int32 sbAfter = slotNamed(w: w, name: nameB);
             string slotsNow = allNames(w: w);
+            Optional<PadInfo> plainB = w.padInfo(slot: sbAfter);
+            bool onlyDual = match (plainB) { case Some(value: i): i.rumble() && !i.triggerRumble(); case None: false; };
+            check(t: t, name: "SDL's pad without trigger motors says so", ok: onlyDual, why: "it says otherwise");
             check(t: t, name: "a new pad takes the lowest free slot: the one a pad just left, while the others keep theirs",
                   ok: sa >= 0 && sb > sa && sc == sa && sbAfter == sb, why: "A ${sa}, B ${sb} then ${sbAfter}, C ${sc}; ids ${a} ${b} ${c}; slots ${slotsNow}");
             windowtests_virtual_detach(id: b);
@@ -264,6 +383,8 @@ unsafe fn void systemPadCases(ref Tally t) {
     string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
     if (!skip.isEmpty()) { println(s: "skip the system's pads (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
     replacedRead(t: t);
+    winseam_pads_from_system(on: 0);
+    rumbleCases(t: t);
     virtualPad(t: t);
     winseam_pads_from_system(on: 0);
 }

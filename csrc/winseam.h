@@ -153,13 +153,27 @@ void winseam_set_pads_when_unfocused(winseam_window *window, int32_t on);
 // reads the system again, the table emptied first.
 void winseam_pads_from_system(int32_t on);
 void winseam_system_pad(int32_t slot, int32_t connected, const float *buttons, const float *axes, const char *name,
-                        int32_t vendor, int32_t product, const char *serial, const char *id);
+                        int32_t vendor, int32_t product, const char *serial, const char *id, int32_t caps);
+// While a test replaces the system's read: the last rumble the system's `slot` was asked for, its strong, weak, left and
+// right motors into `motors[4]` (a dual rumble sets the first two, a trigger rumble the last two) and its milliseconds;
+// the number of requests since the slot was set, 0 when none.
+int32_t winseam_system_pad_rumbled(int32_t slot, float *motors, int32_t *milliseconds);
 // What the system says of the pad in `slot`, as `window` knows it: its name (`which` 0), its serial (1) or its id (2), the
 // system's own name for the device, copied into `into` (at most `capacity` bytes, UTF-8, not terminated), the length
-// returned; its USB vendor (`which` 0) or product (1), 0 when the system gives none. -1 when the window knows no pad
-// there, or is headless.
+// returned; its USB vendor (`which` 0) or product (1), 0 when the system gives none, or what it can do (2): bits
+// WINSEAM_PAD_RUMBLE and WINSEAM_PAD_TRIGGER_RUMBLE. -1 when the window knows no pad there, or is headless.
 int32_t winseam_pad_text(winseam_window *window, int32_t slot, int32_t which, uint8_t *into, int32_t capacity);
 int32_t winseam_pad_number(winseam_window *window, int32_t slot, int32_t which);
+#define WINSEAM_PAD_RUMBLE 1            // a strong (low-frequency) and a weak (high-frequency) motor
+#define WINSEAM_PAD_TRIGGER_RUMBLE 2    // a motor in each trigger
+
+// Rumble (WIN-4, decision 7) on the pad in `slot`, as `window` knows it: `strong` the low-frequency motor and `weak` the
+// high-frequency one, each clamped to 0 to 1, for `milliseconds`; all 0 stops it. The trigger rumble the same with each
+// trigger's motor. 1 when the system took it; 0 when the window knows no pad there or is headless, when its pads read
+// neutral (unfocused, pads not read in the background: decision 5), or when the pad has no such motor. A focus loss
+// that closes the window's pads stops each rumble the window started, as it releases each held button (decision 6).
+int32_t winseam_pad_rumble(winseam_window *window, int32_t slot, float strong, float weak, int32_t milliseconds);
+int32_t winseam_pad_rumble_triggers(winseam_window *window, int32_t slot, float left, float right, int32_t milliseconds);
 
 void winseam_size(winseam_window *window, int32_t *width, int32_t *height);
 void winseam_framebuffer_size(winseam_window *window, int32_t *width, int32_t *height);

@@ -28,7 +28,7 @@ import {
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::KIND_PAD_CONNECTED, window::native::KIND_PAD_DISCONNECTED, window::native::KIND_PAD_DOWN,
     window::native::KIND_PAD_UP, window::native::winseam_pad, window::native::padSample, window::native::padRead,
-    window::native::setPadsWhenUnfocused, window::native::padText, window::native::padNumber,
+    window::native::setPadsWhenUnfocused, window::native::padText, window::native::padNumber, window::native::padRumble,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
     window::native::holdWindow, window::native::releaseWindow, window::native::windowClosed,
     window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::releaseHeldInput,
@@ -119,24 +119,26 @@ type value Gamepad {
 }
 
 // What the system says of the pad in a slot (`Window.padInfo`): its name; its USB vendor and product, 0 where the system
-// gives none; its serial, empty where it has none; and the system's own name for the device, which on Windows'
-// GameInput held for each pad across every replug and run (WIN-4's measurements). Which player a returning pad belongs
-// to is the consumer's (decision 4).
+// gives none; its serial, empty where it has none; the system's own name for the device, which on Windows' GameInput
+// held for each pad across every replug and run (WIN-4's measurements); and which rumble it has. Which player a
+// returning pad belongs to is the consumer's (decision 4).
 type resource PadInfo {
     string padName;
     uint16 vendorId;
     uint16 productId;
     string serialNumber;
     string deviceId;
+    int32 caps;
 
     friend Window::padInfo[made];
 
-    ctor made(string name, uint16 vendor, uint16 product, string serial, string id) {
+    ctor made(string name, uint16 vendor, uint16 product, string serial, string id, int32 caps) {
         this.padName = give name;
         this.vendorId = vendor;
         this.productId = product;
         this.serialNumber = give serial;
         this.deviceId = give id;
+        this.caps = caps;
     }
 
     public const fn string name() { return copy this.padName; }
@@ -144,6 +146,10 @@ type resource PadInfo {
     public const fn uint16 product() { return this.productId; }
     public const fn string serial() { return copy this.serialNumber; }
     public const fn string id() { return copy this.deviceId; }
+    // A strong (low-frequency) and a weak (high-frequency) motor: `Window.rumble`.
+    public const fn bool rumble() { return (this.caps & 1) != 0; }
+    // A motor in each trigger: `Window.rumbleTriggers`.
+    public const fn bool triggerRumble() { return (this.caps & 2) != 0; }
 }
 
 // One pointer as an event saw it: a W3C PointerEvent's fields, named as the DOM names them. The mouse is pointer 1;
@@ -585,8 +591,27 @@ type resource Window {
         string name = padString(window: this.seam, slot: slot, which: 0);
         string serial = padString(window: this.seam, slot: slot, which: 1);
         string id = padString(window: this.seam, slot: slot, which: 2);
+        int32 caps = padNumber(window: this.seam, slot: slot, which: 2);
         return Optional::Some(value: PadInfo.made(name: give name, vendor: cast<uint16>(vendor),
-                                                product: cast<uint16>(product), serial: give serial, id: give id));
+                                                product: cast<uint16>(product), serial: give serial, id: give id,
+                                                caps: caps));
+    }
+
+    // Rumble on the pad in `slot` (WIN-4, decision 7): `strong` its low-frequency motor and `weak` its high-frequency
+    // one, each clamped to 0 to 1, for `milliseconds`; all 0 stops it. True when the system took it; false when there is
+    // no pad there, the window is headless, the pad has no such motors (`PadInfo.rumble`), or the window's pads read
+    // neutral: unfocused, with pads not read in the background. A focus loss that closes the pads stops each rumble the
+    // window started, as it releases each held button.
+    public unsafe fn bool rumble(int32 slot, float32 strong, float32 weak, int32 milliseconds) {
+        if (this.seam == null) { return false; }
+        return padRumble(window: this.seam, slot: slot, a: strong, b: weak, milliseconds: milliseconds, triggers: false) != 0;
+    }
+
+    // Rumble in the triggers of the pad in `slot`, `left` and `right` each 0 to 1, as `rumble` is: false when the pad has
+    // no trigger motors (`PadInfo.triggerRumble`).
+    public unsafe fn bool rumbleTriggers(int32 slot, float32 left, float32 right, int32 milliseconds) {
+        if (this.seam == null) { return false; }
+        return padRumble(window: this.seam, slot: slot, a: left, b: right, milliseconds: milliseconds, triggers: true) != 0;
     }
 
     // Whether the window reads its pads while it is unfocused (WindowOptions.padsWhenUnfocused). Turned off while
