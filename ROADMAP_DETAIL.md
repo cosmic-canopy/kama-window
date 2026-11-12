@@ -17,6 +17,37 @@ packages, beside the DevTools one, and Firefox installed where the gate runs. It
 which needs every claimed target green; Safari waits for a Mac (WIN-12). What differs is measured, not assumed:
 Firefox reports a mouse wheel in lines, and its pointer lock and focus may order their events otherwise.
 
+**Measured first, on 2026-11-12** (kyoten's sixteenth session, `.scratch/win18-kamarun/`; kama 0.9.928, whose
+`kama run --target WASM` runs a page in any browser, KR-377). This package's browser leg and `@kama/gpu`'s, under
+`kama run … --target WASM --headless`, against the stopgap (`tools/webtest.mjs`) on the same builds:
+
+| | Edge 157 | Chrome for Testing 157 | Firefox 160 |
+|---|---|---|---|
+| `@kama/window`'s tests (stopgap: 264, 0 failed) | 253 cases, 8 failed | 253 cases, 8 failed (see below) | 253 cases, 8 failed |
+| `@kama/gpu`'s tests (stopgap: 74, 0 failed) | 74, 1 failed | 74, 1 failed | no WebGPU adapter, then an abort |
+| `@kama/gpu`'s clear, 60 frames | 60 frames, 0 errors | 60 frames, 0 errors | no WebGPU adapter, an abort |
+
+- **Firefox runs this package's cases as Chromium does:** the same 8 failures in all three, and no other.
+- **The 8 are two causes, neither Firefox's:**
+  - 7 cases are written for a device scale of 1.5, "so pixel sizes are not CSS sizes", which the stopgap sets
+    (`--force-device-scale-factor`). `kama run` opens at the display's own scale, 1 headless, where pixels are CSS
+    pixels; it takes no browser flags and no scale.
+  - The trusted-input steps (14 requests, `tests/src/web.kama`) wait out 3,600 frames for a driver, and the 11 cases
+    after the first never run. Trusted input is kama's KR-378, filed and not built.
+- **`@kama/gpu`'s one failure is the scale too:** its too-wide canvas is 6000 CSS pixels, past 8192 only at 1.5.
+- **WebGPU needs no flag under `kama run`:** headless Edge and Chrome for Testing give an adapter without
+  `--enable-unsafe-webgpu`.
+- **Headless Firefox 160 gives no WebGPU adapter here:** `navigator.gpu` is there and `requestAdapter()` answers null,
+  with the default prefs and with four sets that force WebGPU, its blocklist off, the GPU process and hardware
+  compositing. A visible Firefox was not tried: its window would take the focus.
+- **Chrome for Testing unzipped into `~/browsers` never loads the page under `kama run`:** the folder lacks the read
+  access Chrome's installer grants its sandbox, so its sandboxed network service crashes at start-up, and the first
+  navigation, the page `kama run` names on the command line, hangs. With `--disable-features=NetworkServiceSandbox` it
+  runs as Edge does. The stopgap never saw this: it opens `about:blank` and navigates later, over the DevTools protocol.
+- **Time:** about the same. `@kama/gpu`'s tests take 7.4 to 8.4 s under `kama run` with its build, and 6.8 to 7.1 s
+  under the stopgap without one. This package's take 65 to 224 s under `kama run`, all but a few waiting out the
+  trusted-input steps, against 8.5 s.
+
 <a id="pointer-samples"></a>
 ## WIN-19: every pointer sample
 
