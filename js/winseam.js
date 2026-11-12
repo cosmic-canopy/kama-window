@@ -422,6 +422,66 @@ mergeInto(LibraryManager.library, {
   },
 
   // The key table, for the tests: a DOM code to its HID id (0 when the window does not name it), and how many it names.
+  // WIN-4: the page's pads, by the Gamepad API (decision 1). One read of `navigator.getGamepads()` a pump; each slot is
+  // the pad's browser index, the lowest free, reused. A standard-mapped pad fills the standard view, its values as the
+  // browser gives them, untouched; every pad fills the raw view, its buttons and axes in the browser's order. Its vendor
+  // and product are read from its id, as Chromium ("Vendor: 054c Product: 09cc") or Firefox ("054c-09cc-") writes them;
+  // 0 where neither does.
+  winseam_web_pads_read__deps: ['$WinSeam'],
+  winseam_web_pads_read: function () {
+    WinSeam.pads = (typeof navigator !== 'undefined' && navigator.getGamepads) ? navigator.getGamepads() : [];
+  },
+  winseam_web_pad__deps: ['$WinSeam', '$stringToUTF8'],
+  winseam_web_pad: function (slot, sample, name, nameCapacity, meta, rawButtons, rawAxes) {
+    var pads = WinSeam.pads || [];
+    var p = slot < pads.length ? pads[slot] : null;
+    if (!p || !p.connected) return 0;
+    var standard = p.mapping === 'standard';
+    for (var b = 0; b < 17; b++) {
+      var button = standard && b < p.buttons.length ? p.buttons[b] : null;
+      HEAPF32[((sample + 4) >> 2) + b] = button ? button.value : 0;
+    }
+    for (var a = 0; a < 4; a++) HEAPF32[((sample + 72) >> 2) + a] = standard && a < p.axes.length ? p.axes[a] : 0;
+    var id = p.id || '';
+    stringToUTF8(id, name, nameCapacity);
+    var m = /Vendor: ([0-9a-f]{4}) Product: ([0-9a-f]{4})/i.exec(id) || /^([0-9a-f]{1,4})-([0-9a-f]{1,4})-/i.exec(id);
+    var caps = 0, actuator = p.vibrationActuator;
+    if (actuator) {
+      var effects = actuator.effects || (actuator.type ? [actuator.type] : []);
+      if (effects.indexOf('dual-rumble') >= 0) caps |= 1;
+      if (effects.indexOf('trigger-rumble') >= 0) caps |= 2;
+    }
+    var nb = Math.min(p.buttons.length, 32), na = Math.min(p.axes.length, 8);
+    HEAP32[meta >> 2] = m ? parseInt(m[1], 16) : 0;
+    HEAP32[(meta >> 2) + 1] = m ? parseInt(m[2], 16) : 0;
+    HEAP32[(meta >> 2) + 2] = caps;
+    HEAP32[(meta >> 2) + 3] = standard ? 1 : 0;
+    HEAP32[(meta >> 2) + 4] = nb;
+    HEAP32[(meta >> 2) + 5] = na;
+    for (b = 0; b < nb; b++) HEAPU8[rawButtons + b] = p.buttons[b].pressed ? 1 : 0;
+    for (a = 0; a < na; a++) HEAPF32[(rawAxes >> 2) + a] = p.axes[a];
+    return 1;
+  },
+  // A rumble on the page's pad at `slot`: its actuator's dual-rumble or trigger-rumble effect, or its reset to stop.
+  // The browser's promise settles later and is not waited on: 1 once asked, 0 with no actuator.
+  winseam_web_rumble__deps: ['$WinSeam'],
+  winseam_web_rumble: function (slot, a, b, milliseconds, triggers) {
+    var pads = (typeof navigator !== 'undefined' && navigator.getGamepads) ? navigator.getGamepads() : [];
+    var p = slot < pads.length ? pads[slot] : null;
+    var actuator = p ? p.vibrationActuator : null;
+    if (!actuator) return 0;
+    try {
+      var done;
+      if (a === 0 && b === 0 && milliseconds === 0 && actuator.reset) done = actuator.reset();
+      else if (triggers) done = actuator.playEffect('trigger-rumble', { startDelay: 0, duration: milliseconds, leftTrigger: a, rightTrigger: b });
+      else done = actuator.playEffect('dual-rumble', { startDelay: 0, duration: milliseconds, strongMagnitude: a, weakMagnitude: b });
+      if (done && done.catch) done.catch(function () {});
+      return 1;
+    } catch (e) {
+      return 0;
+    }
+  },
+
   winseam_web_code_to_hid__deps: ['$WinSeam', '$UTF8ToString'],
   winseam_web_code_to_hid: function (code) {
     var c = UTF8ToString(code);

@@ -10,7 +10,7 @@ file @compileFor(ARCH_WASM32);
 import {
     core::println,
     std::app::App, std::app::Lifecycle, std::app::run, std::app::quit,
-    Tally, describe, quietly, drained, expectDrained, summary,
+    Tally, describe, quietly, drained, expectDrained, summary, webPadCases,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Pointer, window::CursorMode,
     window::Size, window::NativeWindow, window::NativeKind,
 };
@@ -621,6 +621,7 @@ unsafe fn void webWindow(ref Tally t) {
     keys(t: t, w: w);
     pointers(t: t, w: w);
     cursor(t: t, w: w);
+    webPadCases(t: t, w: w);
     closing(t: t, w: give w);
     canvases(t: t);
     pageSized(t: t);

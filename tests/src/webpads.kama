@@ -1,0 +1,147 @@
+file @compileFor(ARCH_WASM32);
+// WIN-4 part C: the page's pads, through the Gamepad API (decision 1). Each pump reads `navigator.getGamepads()` into
+// the same table the native backend fills, the browser's index the slot (the lowest free, reused, as the spec says). The
+// cases replace `getGamepads` with the tests' own pads (tests/js/windowtests.js), so they need no device and no gesture,
+// and they show what the package evens out between browsers: a trigger the browser calls not pressed, a pad it does not
+// map, the two ways browsers write a pad's vendor and product, and a pad with no rumble.
+
+import {
+    Tally, drained, expectDrained,
+    window::Window, window::Event, window::Gamepad, window::PadButton, window::PadAxis, window::PadInfo, window::PadRaw,
+};
+export { webPadCases };
+
+extern "winseam.h";
+extern fn void winseam_pads_from_system(int32 on);
+
+extern "hooks.h";
+extern fn void windowtests_web_pad(int32 slot, int32 connected, int32 standard, UnsafeConstPtr<cchar> id,
+                                   UnsafeConstPtr<float32> buttons, int32 nbuttons, UnsafeConstPtr<float32> axes,
+                                   int32 naxes, int32 effects);
+extern fn int32 windowtests_web_rumbled(int32 slot, UnsafePtr<float32> motors, UnsafePtr<int32> milliseconds);
+
+unsafe fn void check(ref Tally t, const ref string name, bool ok, const ref string why) {
+    if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
+}
+
+// What `padInfo(slot)` says, as text: "name vendor product [serial] [id] caps mapped", or "none".
+unsafe fn string infoOf(const ref Window w, int32 slot) {
+    Optional<PadInfo> info = w.padInfo(slot: slot);
+    match (info) {
+        case Some(value: i): {
+            string name = i.name();
+            int32 v = cast<int32>(i.vendor());
+            int32 p = cast<int32>(i.product());
+            string serial = i.serial();
+            string id = i.id();
+            bool rumble = i.rumble();
+            bool triggers = i.triggerRumble();
+            bool mapped = i.mapped();
+            return "${name} ${v} ${p} [${serial}] [${id}] ${rumble} ${triggers} ${mapped}";
+        }
+        case None: { return "none"; }
+    };
+}
+
+// What the page's pad in `slot` was last asked to rumble: "strong weak left right milliseconds", "" when never.
+unsafe fn string rumbledOf(int32 slot) {
+    InlineArray<float32>#(4) motors = [0.0; 4];
+    int32 ms = 0;
+    int32 asked = windowtests_web_rumbled(slot: slot, motors: addr(of: motors[0]), milliseconds: addr(of: ms));
+    if (asked == 0) { return ""; }
+    float32 strong = motors[0];
+    float32 weak = motors[1];
+    float32 left = motors[2];
+    float32 right = motors[3];
+    return "${strong} ${weak} ${left} ${right} ${ms}";
+}
+
+unsafe fn void webPadCases(ref Tally t, ref Window w) {
+    winseam_pads_from_system(on: 1);
+    w.setPadsWhenUnfocused(on: true);
+    w.pump();
+    string ignored = drained(w: w);
+
+    // A standard pad, its right trigger at 0.3, which the tests' browser, as a real one may, calls not pressed.
+    InlineArray<float32>#(17) buttons = [0.0; 17];
+    buttons[0] = 1.0;
+    buttons[7] = 0.3;
+    InlineArray<float32>#(4) axes = [0.0; 4];
+    axes[2] = 0.01;
+    string chromeId = "Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 09cc)";
+    windowtests_web_pad(slot: 1, connected: 1, standard: 1, id: chromeId.cstr(), buttons: addr(of: buttons[0]),
+                        nbuttons: 17, axes: addr(of: axes[0]), naxes: 4, effects: 3);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a page's pad connects in the slot of its browser index, its buttons as events",
+                  want: "PadConnected 1; PadButtonDown 1 0; PadButtonDown 1 7");
+    Gamepad g = w.pad(slot: 1);
+    check(t: t, name: "the browser's values are read untouched: a trigger at 0.3 is pressed at 30 of 255, a stick at 0.01",
+          ok: g.pressed(button: PadButton::RightTrigger) && g.value(button: PadButton::RightTrigger) == 0.3
+              && g.axis(axis: PadAxis::RightX) == 0.01,
+          why: "they read otherwise");
+    string chromeInfo = infoOf(w: w, slot: 1);
+    check(t: t, name: "a page's pad: its id is its name, Chromium's vendor and product read, no serial, no device id",
+          ok: chromeInfo == "${chromeId} 1356 2508 [] [] true true true", why: "it is `${chromeInfo}`");
+
+    InlineArray<float32>#(17) none = [0.0; 17];
+    string firefoxId = "054c-09cc-Wireless Controller";
+    windowtests_web_pad(slot: 2, connected: 1, standard: 1, id: firefoxId.cstr(), buttons: addr(of: none[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    InlineArray<float32>#(6) rawButtons = [0.0; 6];
+    rawButtons[4] = 1.0;
+    InlineArray<float32>#(2) rawAxes = [0.5, -1.0];
+    string joystick = "a joystick";
+    windowtests_web_pad(slot: 3, connected: 1, standard: 0, id: joystick.cstr(), buttons: addr(of: rawButtons[0]),
+                        nbuttons: 6, axes: addr(of: rawAxes[0]), naxes: 2, effects: 0);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a pad the browser does not map connects, and its buttons make no events",
+                  want: "PadConnected 2; PadConnected 3");
+    string firefoxInfo = infoOf(w: w, slot: 2);
+    check(t: t, name: "Firefox's way of writing a vendor and product is read too, and a pad with no actuator has no rumble",
+          ok: firefoxInfo == "${firefoxId} 1356 2508 [] [] false false true", why: "it is `${firefoxInfo}`");
+    string joystickInfo = infoOf(w: w, slot: 3);
+    check(t: t, name: "a pad the browser does not map says so", ok: joystickInfo == "a joystick 0 0 [] [] false false false",
+          why: "it is `${joystickInfo}`");
+    PadRaw r = w.padRaw(slot: 3);
+    Gamepad unmapped = w.pad(slot: 3);
+    check(t: t, name: "its raw view is the browser's buttons and axes, and its standard view stays at rest",
+          ok: r.buttonCount == 6 && r.button(index: 4) && !r.button(index: 0) && r.axisCount == 2 && r.axis(index: 1) == -1.0
+              && r.hatCount == 0 && !unmapped.pressed(button: PadButton::South) && unmapped.axis(axis: PadAxis::LeftX) == 0.0,
+          why: "${r.buttonCount} buttons, ${r.axisCount} axes, or a value read otherwise");
+
+    bool took = w.rumble(slot: 1, strong: 1.0, weak: 0.25, milliseconds: 200);
+    string dual = rumbledOf(slot: 1);
+    check(t: t, name: "a rumble plays the browser's dual-rumble effect", ok: took && dual == "1 0.25 0 0 200",
+          why: "took ${took}, `${dual}`");
+    took = w.rumbleTriggers(slot: 1, left: 0.5, right: 0.75, milliseconds: 100);
+    string triggers = rumbledOf(slot: 1);
+    check(t: t, name: "a trigger rumble plays its trigger-rumble effect", ok: took && triggers == "1 0.25 0.5 0.75 100",
+          why: "took ${took}, `${triggers}`");
+    check(t: t, name: "a pad with no actuator rumbles nothing", ok: !w.rumble(slot: 2, strong: 1.0, weak: 1.0, milliseconds: 100),
+          why: "it took one");
+    check(t: t, name: "on the web, the browser maps: added mappings take nothing",
+          ok: Window::addPadMappings(text: "03000000ffff0000eeee000000000000,a pad,a:b0,") == 0, why: "it took one");
+
+    w.post(event: Event::Focus(focused: false));
+    w.setPadsWhenUnfocused(on: false);
+    expectDrained(t: t, w: w, name: "on the web too, pads that close at a focus loss release what they hold",
+                  want: "Focus false; PadButtonUp 1 0; PadButtonUp 1 7");
+    string stopped = rumbledOf(slot: 1);
+    check(t: t, name: "and the rumbles the window started stop: the actuator is reset", ok: stopped == "0 0 0 0 -1",
+          why: "`${stopped}`");
+    w.pump();
+    Gamepad neutral = w.pad(slot: 1);
+    check(t: t, name: "unfocused, a page's pad reads neutral", ok: !neutral.pressed(button: PadButton::South),
+          why: "it reads South pressed");
+
+    windowtests_web_pad(slot: 1, connected: 0, standard: 1, id: chromeId.cstr(), buttons: addr(of: none[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    windowtests_web_pad(slot: 2, connected: 0, standard: 1, id: firefoxId.cstr(), buttons: addr(of: none[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    windowtests_web_pad(slot: 3, connected: 0, standard: 0, id: joystick.cstr(), buttons: addr(of: none[0]), nbuttons: 6,
+                        axes: addr(of: rawAxes[0]), naxes: 2, effects: 0);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a page's pads disconnect when the browser no longer lists them",
+                  want: "PadDisconnected 1; PadDisconnected 2; PadDisconnected 3");
+    winseam_pads_from_system(on: 0);
+}

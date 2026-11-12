@@ -101,4 +101,65 @@ mergeInto(LibraryManager.library, {
 
   windowtests_locked__deps: ['$WT'],
   windowtests_locked: function (sel) { return document.pointerLockElement === WT.el(sel) ? 1 : 0; },
+
+  // WIN-4: the tests' own pads, in place of the browser's (decision 8). The first call replaces `navigator.getGamepads`
+  // with one that lists them, as a browser does, by index; each is a plain object shaped as a Gamepad, its actuator
+  // recording what it is asked to play. Its buttons' `pressed` is the browser's own rule, at half their travel, so a
+  // trigger the package calls pressed at 30 of 255 can be one the browser does not.
+  windowtests_web_pad__deps: ['$UTF8ToString'],
+  windowtests_web_pad: function (slot, connected, standard, id, buttons, nbuttons, axes, naxes, effects) {
+    if (!globalThis.windowtestsPads) {
+      globalThis.windowtestsPads = [];
+      Object.defineProperty(navigator, 'getGamepads', {
+        configurable: true,
+        value: function () { return globalThis.windowtestsPads.slice(); },
+      });
+    }
+    var pads = globalThis.windowtestsPads;
+    if (!connected) { pads[slot] = null; return; }
+    var bs = [], as = [];
+    for (var i = 0; i < nbuttons; i++) {
+      var v = HEAPF32[(buttons >> 2) + i];
+      bs.push({ pressed: v >= 0.5, touched: v > 0, value: v });
+    }
+    for (var j = 0; j < naxes; j++) as.push(HEAPF32[(axes >> 2) + j]);
+    var record = { count: 0, motors: [0, 0, 0, 0], ms: 0 };
+    var actuator = null;
+    if (effects) {
+      var kinds = [];
+      if (effects & 1) kinds.push('dual-rumble');
+      if (effects & 2) kinds.push('trigger-rumble');
+      actuator = {
+        effects: kinds,
+        playEffect: function (type, params) {
+          record.count += 1;
+          if (type === 'dual-rumble') { record.motors[0] = params.strongMagnitude; record.motors[1] = params.weakMagnitude; }
+          else { record.motors[2] = params.leftTrigger; record.motors[3] = params.rightTrigger; }
+          record.ms = params.duration;
+          return Promise.resolve('complete');
+        },
+        reset: function () {
+          record.count += 1;
+          record.motors = [0, 0, 0, 0];
+          record.ms = -1;   // a reset, told apart from an effect of no strength
+          return Promise.resolve('complete');
+        },
+      };
+    }
+    pads[slot] = {
+      index: slot, id: UTF8ToString(id), connected: true, mapping: standard ? 'standard' : '', buttons: bs, axes: as,
+      timestamp: performance.now(), vibrationActuator: actuator, windowtestsRecord: record,
+    };
+  },
+
+  // How many effects the tests' pad at `slot` was asked to play, the last ones' motors (strong, weak, left, right) and
+  // length, -1 after a reset; 0 when none.
+  windowtests_web_rumbled: function (slot, motors, ms) {
+    var p = globalThis.windowtestsPads && globalThis.windowtestsPads[slot];
+    if (!p || !p.windowtestsRecord) return 0;
+    var r = p.windowtestsRecord;
+    for (var i = 0; i < 4; i++) HEAPF32[(motors >> 2) + i] = r.motors[i];
+    HEAP32[ms >> 2] = r.ms;
+    return r.count;
+  },
 });

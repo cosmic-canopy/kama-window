@@ -1290,6 +1290,54 @@ extern int32_t winseam_web_open(winseam_window *record, const char *selector, in
 extern void winseam_web_close(int32_t index);
 extern winseam_window *winseam_web_pull(winseam_event *into);
 extern void winseam_web_set_cursor(int32_t index, int32_t mode);
+// The page's pads (WIN-4, decision 1): one read of `navigator.getGamepads()` a pump, then each slot from it. A slot is
+// the pad's browser index. 1 and its parts written (meta: vendor, product, rumble bits, mapped, raw buttons, raw axes),
+// or 0 for an empty index.
+extern void winseam_web_pads_read(void);
+extern int32_t winseam_web_pad(int32_t slot, winseam_pad *sample, char *name, int32_t name_capacity, int32_t *meta,
+                               uint8_t *raw_buttons, float *raw_axes);
+extern int32_t winseam_web_rumble(int32_t slot, float a, float b, int32_t milliseconds, int32_t triggers);
+
+// js/winseam.js writes a pad's sample in this layout, at these offsets.
+_Static_assert(offsetof(winseam_pad, buttons) == 4, "js/winseam.js writes winseam_pad's layout");
+_Static_assert(offsetof(winseam_pad, axes) == 72, "js/winseam.js writes winseam_pad's layout");
+_Static_assert(sizeof(winseam_pad) == 88, "js/winseam.js writes winseam_pad's layout");
+
+// The page's pads into the table, while the system's are read.
+static void read_system_pads(void) {
+    if (!g_from_system) return;
+    winseam_web_pads_read();
+    for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+        system_pad *p = &g_system[slot];
+        winseam_pad s;
+        char name[sizeof p->name];
+        int32_t meta[6] = { 0, 0, 0, 0, 0, 0 };
+        uint8_t raw_buttons[WINSEAM_PAD_RAW_BUTTONS];
+        float raw_axes[WINSEAM_PAD_RAW_AXES];
+        memset(&s, 0, sizeof s);
+        memset(name, 0, sizeof name);
+        memset(raw_buttons, 0, sizeof raw_buttons);
+        memset(raw_axes, 0, sizeof raw_axes);
+        if (!winseam_web_pad(slot, &s, name, (int32_t)sizeof name, meta, raw_buttons, raw_axes)) {
+            memset(p, 0, sizeof *p);
+            continue;
+        }
+        s.connected = 1;
+        p->sample = s;
+        copy_string(p->name, sizeof p->name, name);
+        p->serial[0] = 0;   // the web gives a pad no serial and no id of its own (anti-fingerprinting)
+        p->id[0] = 0;
+        p->vendor = meta[0];
+        p->product = meta[1];
+        p->caps = meta[2];
+        p->mapped = meta[3];
+        p->raw_counts[0] = meta[4] > WINSEAM_PAD_RAW_BUTTONS ? WINSEAM_PAD_RAW_BUTTONS : meta[4];
+        p->raw_counts[1] = meta[5] > WINSEAM_PAD_RAW_AXES ? WINSEAM_PAD_RAW_AXES : meta[5];
+        p->raw_counts[2] = 0;   // the Gamepad API has no hats
+        memcpy(p->raw_buttons, raw_buttons, sizeof raw_buttons);
+        memcpy(p->raw_axes, raw_axes, sizeof raw_axes);
+    }
+}
 
 int32_t winseam_glfw_key_to_hid(int32_t k) { (void)k; return 0; }
 int32_t winseam_glfw_button_to_pointer(int32_t b) { (void)b; return -1; }
@@ -1381,6 +1429,7 @@ void winseam_pump(winseam_window *w) {
     winseam_event e;
     winseam_window *target;
     while ((target = winseam_web_pull(&e)) != NULL) web_take(target, &e);
+    read_system_pads();
     deliver_system_pads();
 }
 
@@ -1399,10 +1448,9 @@ void winseam_set_cursor(winseam_window *w, int32_t mode) {
 // The browser maps the page's pads.
 int32_t winseam_add_pad_mappings(const char *text, int32_t length) { (void)text; (void)length; return 0; }
 
-// A rumble on the page's pads: part C's (WIN-4); none yet.
+// A rumble on the page's pad: its actuator's dual-rumble or trigger-rumble effect, all 0 its reset.
 static int system_rumble(int32_t slot, float a, float b, int32_t milliseconds, int triggers) {
-    (void)slot; (void)a; (void)b; (void)milliseconds; (void)triggers;
-    return 0;
+    return winseam_web_rumble(slot, a, b, milliseconds, triggers) != 0;
 }
 
 int32_t winseam_native_kind(winseam_window *w) { return w->selector != NULL ? 5 : 0; }

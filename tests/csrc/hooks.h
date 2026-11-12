@@ -78,5 +78,11 @@ void windowtests_backing(const char *sel, int32_t *width, int32_t *height);
 int32_t windowtests_acked(void);
 int32_t windowtests_locked(const char *sel);
 int32_t windowtests_report_sizes(const char *sel, double width, double height, int32_t fw, int32_t fh, double scale);
+// The tests' own pad at browser index `slot` (WIN-4): connected or gone, standard-mapped or not, its id, `nbuttons`
+// button values and `naxes` axes, and `effects` (1 dual-rumble, 2 trigger-rumble) its actuator plays; and what it was
+// asked to play.
+void windowtests_web_pad(int32_t slot, int32_t connected, int32_t standard, const char *id, const float *buttons,
+                         int32_t nbuttons, const float *axes, int32_t naxes, int32_t effects);
+int32_t windowtests_web_rumbled(int32_t slot, float *motors, int32_t *milliseconds);
 
 #endif
