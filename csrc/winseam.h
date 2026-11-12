@@ -40,6 +40,26 @@
 #define WINSEAM_POINTER_LOCK 14    // a: locked
 #define WINSEAM_CLOSE_REQUESTED 15
 #define WINSEAM_DROPPED 16         // a: how many
+#define WINSEAM_PAD_CONNECTED 17   // a: the slot
+#define WINSEAM_PAD_DISCONNECTED 18 // a: the slot
+#define WINSEAM_PAD_DOWN 19        // a: the slot, b: the button (the W3C's standard numbering)
+#define WINSEAM_PAD_UP 20          // a: the slot, b: the button
+
+// Gamepads (WIN-4, ROADMAP_DETAIL.md § WIN-4). Each window keeps its own view of each slot: the latest sample, the
+// system's or a post's, compared with what the consumer has seen, makes a slot's connect and disconnect and each button's
+// down and up, paired as a key's are. A button is pressed at 30 of 255 or more of its travel, on every backend (decision
+// 2a). A focus change releases each held pad button after the pointers' and before the keys', and while the window is
+// unfocused a pad reads neutral, unless the program asked for pads in the background (decisions 5 and 6).
+#define WINSEAM_PADS 16
+#define WINSEAM_PAD_BUTTONS 17     // the W3C's standard gamepad: faces, shoulders, triggers, back, start, sticks, d-pad, guide
+#define WINSEAM_PAD_AXES 4         // left x, left y, right x, right y: -1 to 1, right and down positive
+
+// A pad as one read of it. `connected` 0 is a slot with no pad, whose values are 0.
+typedef struct winseam_pad {
+    int32_t connected;
+    float buttons[WINSEAM_PAD_BUTTONS];   // 0 to 1
+    float axes[WINSEAM_PAD_AXES];         // -1 to 1
+} winseam_pad;
 
 // Pointer kinds, and the buttons a pointer can hold: 0 to 5 as the W3C's `button` numbers them (left, middle, right,
 // back, forward, a pen's eraser), then a mouse's sixth to eighth.
@@ -104,9 +124,23 @@ void winseam_pump(winseam_window *window);
 int32_t winseam_next(winseam_window *window, winseam_event *into);
 // A record into the ring as if the system had sent it (a test, a replay, a server): the held set's rules apply to it.
 void winseam_post(winseam_window *window, const winseam_event *event);
-// The end of every held pointer (a mouse's buttons up, a contact cancelled), then an up for every held key by HID id, as
-// a focus change makes them, with no Focus record.
+// The end of every held pointer (a mouse's buttons up, a contact cancelled), then an up for every held pad button by slot
+// and number, then an up for every held key by HID id, as a focus change makes them, with no Focus record. A pad then
+// reads neutral until its next sample.
 void winseam_release_held(winseam_window *window);
+
+// A pad's sample into slot `slot` (0 to WINSEAM_PADS - 1, any other ignored) as if the system had read it: compared with
+// what the consumer has seen, it makes the slot's events.
+void winseam_pad_sample(winseam_window *window, int32_t slot, const winseam_pad *sample);
+// The same, from its parts: WINSEAM_PAD_BUTTONS values at `buttons` and WINSEAM_PAD_AXES at `axes` (kama's arrays, which
+// cannot yet write into a winseam_pad's: KAMA_GAPS.md).
+void winseam_pad_post(winseam_window *window, int32_t slot, int32_t connected, const float *buttons, const float *axes);
+// The pad in `slot` as the consumer reads it: connected once its connect is queued; neutral while the window is unfocused
+// (unless pads are read in the background) and after a release until its next sample; all 0 for an empty slot.
+void winseam_pad_read(winseam_window *window, int32_t slot, winseam_pad *into);
+// Pads read while the window is unfocused (1) or neutral then (0, the default). Turned off while unfocused, what the pads
+// hold is released at once.
+void winseam_set_pads_when_unfocused(winseam_window *window, int32_t on);
 
 void winseam_size(winseam_window *window, int32_t *width, int32_t *height);
 void winseam_framebuffer_size(winseam_window *window, int32_t *width, int32_t *height);

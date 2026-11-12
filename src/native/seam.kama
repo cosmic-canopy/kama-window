@@ -4,7 +4,8 @@ export {
     winseam_event,
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_POINTER_MOVE, KIND_POINTER_DOWN, KIND_POINTER_UP, KIND_POINTER_CANCEL,
     KIND_POINTER_ENTER, KIND_POINTER_LEAVE, KIND_SCROLL, KIND_RESIZE, KIND_SCALE_CHANGED, KIND_FOCUS, KIND_POINTER_LOCK,
-    KIND_CLOSE_REQUESTED, KIND_DROPPED,
+    KIND_CLOSE_REQUESTED, KIND_DROPPED, KIND_PAD_CONNECTED, KIND_PAD_DISCONNECTED, KIND_PAD_DOWN, KIND_PAD_UP,
+    winseam_pad, PAD_SLOTS, PAD_BUTTONS, PAD_AXES, padSample, padRead, setPadsWhenUnfocused,
     openWindow, headlessWindow, closeWindow, holdWindow, releaseWindow, windowClosed, pumpWindow, nextEvent, postEvent,
     releaseHeldInput, windowSize, framebufferSize, windowScale, setCursor, nativeKind, nativeDisplay, nativeWindow, glfwKeyToHid,
 };
@@ -27,6 +28,22 @@ comptime int32 KIND_FOCUS = 13;
 comptime int32 KIND_POINTER_LOCK = 14;
 comptime int32 KIND_CLOSE_REQUESTED = 15;
 comptime int32 KIND_DROPPED = 16;
+comptime int32 KIND_PAD_CONNECTED = 17;
+comptime int32 KIND_PAD_DISCONNECTED = 18;
+comptime int32 KIND_PAD_DOWN = 19;
+comptime int32 KIND_PAD_UP = 20;
+
+comptime int32 PAD_SLOTS = 16;
+comptime int32 PAD_BUTTONS = 17;
+comptime int32 PAD_AXES = 4;
+
+// One read of a pad; the header owns the layout.
+@generate(zero)
+type extern value winseam_pad {
+    public int32 connected;
+    public InlineArray<float32>#(17) buttons;
+    public InlineArray<float32>#(4) axes;
+}
 
 // One ring record; the header owns the layout, and kama asserts each field against it at build.
 @generate(zero)
@@ -71,6 +88,17 @@ extern fn int32 winseam_native_kind(UnsafePtr window);
 extern fn UnsafePtr winseam_native_display(UnsafePtr window);
 extern fn UnsafePtr winseam_native_window(UnsafePtr window);
 extern fn int32 winseam_glfw_key_to_hid(int32 glfw_key);
+extern fn void winseam_pad_post(UnsafePtr window, int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
+                                UnsafeConstPtr<float32> axes);
+extern fn void winseam_pad_read(UnsafePtr window, int32 slot, UnsafePtr into);
+extern fn void winseam_set_pads_when_unfocused(UnsafePtr window, int32 on);
+
+unsafe fn void padSample(UnsafePtr window, int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
+                         UnsafeConstPtr<float32> axes) {
+    winseam_pad_post(window: window, slot: slot, connected: connected, buttons: buttons, axes: axes);
+}
+unsafe fn void padRead(UnsafePtr window, int32 slot, UnsafePtr into) { winseam_pad_read(window: window, slot: slot, into: into); }
+unsafe fn void setPadsWhenUnfocused(UnsafePtr window, int32 on) { winseam_set_pads_when_unfocused(window: window, on: on); }
 
 unsafe fn UnsafePtr openWindow(UnsafeConstPtr<cchar> title, int32 width, int32 height, int32 focused,
                                UnsafeConstPtr<cchar> canvas, int32 sizedByPage, UnsafePtr<uint8> why, int32 capacity,

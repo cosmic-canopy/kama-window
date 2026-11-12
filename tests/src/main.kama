@@ -8,7 +8,7 @@ import {
     window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::Pointer,
     window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
     keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
-    pointerCases, mouseAt, webWindow, webFinish,
+    pointerCases, mouseAt, webWindow, webFinish, padCases,
 };
 
 export { Tally, describe, summary };
@@ -76,6 +76,10 @@ fn string describe(const ref Event e) {
         case Focus(focused: f): { return "Focus ${f}"; }
         case PointerLock(locked: l): { return "PointerLock ${l}"; }
         case CloseRequested: { return "CloseRequested"; }
+        case PadConnected(slot: s): { return "PadConnected ${s}"; }
+        case PadDisconnected(slot: s): { return "PadDisconnected ${s}"; }
+        case PadButtonDown(slot: s, button: b): { int32 bn = cast<int32>(b); return "PadButtonDown ${s} ${bn}"; }
+        case PadButtonUp(slot: s, button: b): { int32 bn = cast<int32>(b); return "PadButtonUp ${s} ${bn}"; }
         case Dropped(count: n): { return "Dropped ${n}"; }
     };
 }
@@ -253,6 +257,7 @@ unsafe fn uint8 appMain() {
     queueDropsPartial(t: t);
     heldCases(t: t);
     pointerCases(t: t);
+    padCases(t: t);
     keyTable(t: t);
     buttonTable(t: t);
     nativeHandles(t: t);

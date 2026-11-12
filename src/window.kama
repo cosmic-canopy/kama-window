@@ -26,6 +26,9 @@ import {
     window::native::KIND_SCROLL,
     window::native::KIND_RESIZE, window::native::KIND_SCALE_CHANGED, window::native::KIND_FOCUS,
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
+    window::native::KIND_PAD_CONNECTED, window::native::KIND_PAD_DISCONNECTED, window::native::KIND_PAD_DOWN,
+    window::native::KIND_PAD_UP, window::native::winseam_pad, window::native::padSample, window::native::padRead,
+    window::native::setPadsWhenUnfocused,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
     window::native::holdWindow, window::native::releaseWindow, window::native::windowClosed,
     window::native::pumpWindow, window::native::nextEvent, window::native::postEvent, window::native::releaseHeldInput,
@@ -36,7 +39,7 @@ import {
 
 export {
     Window, WindowOptions, WindowError, Event, Key, Pointer, PointerKind, PointerButton, ScrollUnit, Mods, CursorMode,
-    Size, NativeKind, NativeWindow,
+    Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis,
 };
 
 type enum WindowError implements Error {
@@ -66,6 +69,54 @@ type enum PointerKind : uint8 { Mouse = 0, Touch = 1, Pen = 2 }
 // What a `Scroll` counts: lines, which a wheel's notch is natively and a browser may report, or pixels, which a browser
 // and a touchpad report. Nothing converts one into the other.
 type enum ScrollUnit : uint8 { Lines = 0, Pixels = 1 }
+
+// A gamepad's button, numbered as the W3C's standard gamepad numbers it. The four face buttons are named by their place,
+// as a `Key` is: Xbox's A, PlayStation's Cross and Nintendo's B are each `South`. What a pad prints on them is its own.
+type enum PadButton : uint8 {
+    South = 0, East = 1, West = 2, North = 3, LeftShoulder = 4, RightShoulder = 5, LeftTrigger = 6, RightTrigger = 7,
+    Back = 8, Start = 9, LeftStick = 10, RightStick = 11, DpadUp = 12, DpadDown = 13, DpadLeft = 14, DpadRight = 15,
+    Guide = 16
+}
+
+// A gamepad's stick axis, numbered as the W3C's standard gamepad numbers it: -1 to 1, right and down positive.
+type enum PadAxis : uint8 { LeftX = 0, LeftY = 1, RightX = 2, RightY = 3 }
+
+// A gamepad as one read of it: whether a pad is in its slot, each button's travel (0 to 1, by `PadButton`) and each
+// stick's axis (-1 to 1, by `PadAxis`), as the device reports them, with no dead zone: shaping a value is the consumer's
+// (WIN-4, decision 2a). A button is pressed at `PressedAt` of its travel or more, on every platform.
+type value Gamepad {
+    public bool connected;
+    public InlineArray<float32>#(17) buttons;
+    public InlineArray<float32>#(4) axes;
+
+    // 30 of 255 of a button's travel: XInput's trigger threshold, and Chromium's for an XInput pad.
+    public comptime float32 PressedAt = 30.0 / 255.0;
+
+    // A pad at rest: connected, every button up, the sticks centred. What a posted sample starts from.
+    public ctor neutral() {
+        this.connected = true;
+        this.buttons = [0.0; 17];
+        this.axes = [0.0; 4];
+    }
+
+    // An empty slot.
+    public ctor disconnected() {
+        this.connected = false;
+        this.buttons = [0.0; 17];
+        this.axes = [0.0; 4];
+    }
+
+    public const fn bool pressed(PadButton button) { return this.buttons[cast<isize>(button)] >= Gamepad::PressedAt; }
+    public const fn float32 value(PadButton button) { return this.buttons[cast<isize>(button)]; }
+    public const fn float32 axis(PadAxis axis) { return this.axes[cast<isize>(axis)]; }
+
+    // `button` all the way down, or all the way up.
+    public fn void press(PadButton button) { this.buttons[cast<isize>(button)] = 1.0; }
+    public fn void release(PadButton button) { this.buttons[cast<isize>(button)] = 0.0; }
+    // `button` at `value` of its travel, 0 to 1.
+    public fn void setValue(PadButton button, float32 value) { this.buttons[cast<isize>(button)] = value; }
+    public fn void setAxis(PadAxis axis, float32 value) { this.axes[cast<isize>(axis)] = value; }
+}
 
 // One pointer as an event saw it: a W3C PointerEvent's fields, named as the DOM names them. The mouse is pointer 1;
 // each touch contact has an id of its own, never reused. Positions and sizes are logical.
@@ -154,6 +205,10 @@ type enum Event {
     Focus(bool focused),
     PointerLock(bool locked),
     CloseRequested,
+    PadConnected(int32 slot),                                  // a pad in `slot`, 0 to 15; `Window.pad(slot)` reads it
+    PadDisconnected(int32 slot),                               // after an up for each button it held
+    PadButtonDown(int32 slot, PadButton button),
+    PadButtonUp(int32 slot, PadButton button),
     Dropped(int32 count)                                       // the queue was full: this many events were lost
 }
 
@@ -240,6 +295,16 @@ unsafe fn PointerButton buttonOf(int32 n) {
     };
 }
 
+// The ring numbers only the buttons PadButton names, so the fallback is never taken.
+unsafe fn PadButton padButtonOf(int32 n) {
+    if (n < 0 || n > 255) { return PadButton::South; }
+    Optional<PadButton> b = try cast<PadButton>(cast<uint8>(n));
+    return match (b) {
+        case Some(value: v): v;
+        case None: PadButton::South;
+    };
+}
+
 unsafe fn PointerKind pointerKindOf(int32 n) {
     if (n == 1) { return PointerKind::Touch; }
     if (n == 2) { return PointerKind::Pen; }
@@ -297,6 +362,10 @@ unsafe fn Event eventOf(const ref winseam_event e) {
     if (k == KIND_FOCUS) { return Event::Focus(focused: e.a != 0); }
     if (k == KIND_POINTER_LOCK) { return Event::PointerLock(locked: e.a != 0); }
     if (k == KIND_CLOSE_REQUESTED) { return Event::CloseRequested; }
+    if (k == KIND_PAD_CONNECTED) { return Event::PadConnected(slot: e.a); }
+    if (k == KIND_PAD_DISCONNECTED) { return Event::PadDisconnected(slot: e.a); }
+    if (k == KIND_PAD_DOWN) { return Event::PadButtonDown(slot: e.a, button: padButtonOf(n: e.b)); }
+    if (k == KIND_PAD_UP) { return Event::PadButtonUp(slot: e.a, button: padButtonOf(n: e.b)); }
     return Event::Dropped(count: e.a);
 }
 
@@ -329,6 +398,10 @@ unsafe fn winseam_event recordOf(const ref Event event) {
         case Focus(focused: f): { e.kind = KIND_FOCUS; if (f) { e.a = 1; } }
         case PointerLock(locked: l): { e.kind = KIND_POINTER_LOCK; if (l) { e.a = 1; } }
         case CloseRequested: { e.kind = KIND_CLOSE_REQUESTED; }
+        case PadConnected(slot: s): { e.kind = KIND_PAD_CONNECTED; e.a = s; }
+        case PadDisconnected(slot: s): { e.kind = KIND_PAD_DISCONNECTED; e.a = s; }
+        case PadButtonDown(slot: s, button: b): { e.kind = KIND_PAD_DOWN; e.a = s; e.b = cast<int32>(b); }
+        case PadButtonUp(slot: s, button: b): { e.kind = KIND_PAD_UP; e.a = s; e.b = cast<int32>(b); }
         case Dropped(count: n): { e.kind = KIND_DROPPED; e.a = n; }
     };
     return e;
@@ -340,9 +413,13 @@ unsafe fn winseam_event recordOf(const ref Event event) {
 //   `GLFW_FOCUSED` and `GLFW_FOCUS_ON_SHOW`; on the web the canvas is focused, or left until the user clicks it.
 // - `sizedByPage`: on the web, the page lays the canvas out, and `width` and `height` go unused; false by default, so
 //   the window sets the canvas's CSS size, as a native window opens at its size. Natively, nothing.
+// - `padsWhenUnfocused`: the window reads its pads while it is unfocused; false by default, so a pad reads neutral and
+//   makes no events while the player is in another program (WIN-4, decision 5). `Window.setPadsWhenUnfocused` changes
+//   it later, for a settings screen.
 type value WindowOptions {
     public bool focused = true;
     public bool sizedByPage = false;
+    public bool padsWhenUnfocused = false;
 
     public ctor make() { }
 }
@@ -388,6 +465,7 @@ type resource Window {
             };
             return Result::Err(error: WindowError::Refused(words: give words));
         }
+        if (options.padsWhenUnfocused) { setPadsWhenUnfocused(window: s, on: 1); }
         return Result::Ok(value: Window.adopt(seam: s));
     }
 
@@ -421,6 +499,47 @@ type resource Window {
     public unsafe fn void releaseHeld() {
         if (this.seam == null) { return; }
         releaseHeldInput(window: this.seam);
+    }
+
+    // A window's pad slots, 0 to 15: a pad keeps its slot while it is connected, and a new one takes the lowest free.
+    public comptime int32 PadSlots = 16;
+
+    // The pad in `slot` as of the last `pump()`: neutral while the window is unfocused (unless it reads pads in the
+    // background) and after a release, until the pad's next sample; disconnected for an empty slot or one outside 0 to
+    // 15. Connected from its `PadConnected` until its `PadDisconnected`.
+    public unsafe const fn Gamepad pad(int32 slot) {
+        Gamepad g = Gamepad.disconnected();
+        if (this.seam == null) { return g; }
+        winseam_pad p = winseam_pad.zero();
+        padRead(window: this.seam, slot: slot, into: cast<UnsafePtr>(addr(of: p)));
+        g.connected = p.connected != 0;
+        // Element by element: a whole InlineArray assigned to or from an extern value's array field lowers to a C array
+        // assignment, which C refuses (KAMA_GAPS.md).
+        isize i = 0;
+        while (i < 17) { g.buttons[i] = p.buttons[i]; i = i + 1; }
+        i = 0;
+        while (i < 4) { g.axes[i] = p.axes[i]; i = i + 1; }
+        return g;
+    }
+
+    // A pad's sample into `slot` as if the system had read it (a test, a replay): compared with what the window has
+    // queued, it makes the slot's connect, disconnect, downs and ups. A slot outside 0 to 15 is ignored.
+    public unsafe fn void postPad(int32 slot, const ref Gamepad pad) {
+        if (this.seam == null) { return; }
+        int32 connected = 0;
+        if (pad.connected) { connected = 1; }
+        // By its parts: kama cannot yet write into an extern value's array (KAMA_GAPS.md).
+        padSample(window: this.seam, slot: slot, connected: connected, buttons: addr(of: pad.buttons[0]),
+                  axes: addr(of: pad.axes[0]));
+    }
+
+    // Whether the window reads its pads while it is unfocused (WindowOptions.padsWhenUnfocused). Turned off while
+    // unfocused, what the pads hold is released at once.
+    public unsafe fn void setPadsWhenUnfocused(bool on) {
+        if (this.seam == null) { return; }
+        int32 o = 0;
+        if (on) { o = 1; }
+        setPadsWhenUnfocused(window: this.seam, on: o);
     }
 
     // Logical size.
