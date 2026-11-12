@@ -10,7 +10,7 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-22**
+**Next id: WIN-24**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
@@ -19,12 +19,14 @@ a page can do with a canvas, a program can do with a window on every platform.
 
 | id | item | why |
 |---|---|---|
-| WIN-4 | **Gamepads**, on the web and natively, each held button and deflected axis released on a focus change, as keys and buttons are | [detail](ROADMAP_DETAIL.md#gamepads) |
+| WIN-4 | **Gamepads**: the Gamepad API on the web, SDL3 natively (GameInput on Windows), as events and state, with rumble, held buttons released on a focus change as keys are | [detail](ROADMAP_DETAIL.md#gamepads) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 
 | id | item | why |
 |---|---|---|
+| WIN-23 | **SDL's own switch from XInput to GameInput**: when an SDL release has it, the vendored SDL moves to it and WIN-4's stopgap goes | [detail](ROADMAP_DETAIL.md#sdl-gameinput-fix) |
+| WIN-22 | **A pad's motion sensors, touchpad and lights**: natively through SDL3, on the web only through WebHID | [detail](ROADMAP_DETAIL.md#pad-sensors) |
 | WIN-5 | **Text input with IME composition** | [detail](ROADMAP_DETAIL.md#ime) |
 | WIN-17 | **Keyboards beyond the US layout**: their extra keys named, and each key's label in the player's layout | [detail](ROADMAP_DETAIL.md#international-keys) |
 | WIN-6 | **The clipboard** | [detail](ROADMAP_DETAIL.md#clipboard) |
