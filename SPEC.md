@@ -321,8 +321,10 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   the program shows no more once one has taken the foreground;
 - the same program under node: 163 cases, the headless ones, the DOM key table, and checks that opening a window
   refuses with no page.
-- the same program in every headless Chromium present (a Chrome for Testing pinned under `~/browsers`, Edge, Chrome;
-  `KAMA_BROWSER` names one), built for the web with its own page, `tests/web/shell.html`: 264 cases. Beside the headless ones (`tests/src/web.kama`):
+- the same program built for the web with its own page, `tests/web/shell.html`, in every browser `tools/browsers.mjs`
+  finds (`KAMA_BROWSER` names one), headless and at a device scale of 1.5: under `kama run --target WASM --scale 1.5` in
+  Edge, Chrome as installed and the pinned Firefox, 253 cases, every one but the trusted input; and through
+  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 264. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,
@@ -342,8 +344,10 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - then, as an App between frames: a resize from the ResizeObserver, and the browser's own input on request (a
     click, keys, a key let go on the canvas after it was pressed in the field, a drag released outside the canvas, a
     touch drag, pointer lock at a click, a locked move, Escape, and no lock after the browser gave it back), with a
-    window on a canvas the page sizes on one axis open throughout, which must hold still (about 150 frames). `tools/webtest.mjs` (node, no npm packages) serves it, runs the
-  browser over the DevTools protocol with a throwaway profile at a device scale of 1.5, and reads the console to the
-  summary line, an abort, an exception or a time limit. A case that needs the browser's own behaviour asks the driver
-  for trusted input (a click, a key, a touch) by printing a request. Skipped, and said so, with no browser, `emcc` or
-  `node`.
+    window on a canvas the page sizes on one axis open throughout, which must hold still (at least 30 frames; about 150
+    through the driver). Under `kama run` the trusted input is skipped, saying so, and the hold follows the resize.
+  `tools/webtest.mjs` (node, no npm packages) serves it, runs the browser over the DevTools protocol with a throwaway
+  profile at a device scale of 1.5, and reads the console to the summary line, an abort, an exception or a time limit.
+  A case that needs the browser's own behaviour asks the driver for trusted input (a click, a key, a touch) by printing
+  a request. A scale case at any scale but 1.5 is skipped, saying so, and `tools/test.sh` fails a run that skips one.
+  Skipped, and said so, with no browser, `emcc` or `node`.

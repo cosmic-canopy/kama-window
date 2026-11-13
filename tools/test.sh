@@ -71,11 +71,19 @@ elif ! "$KAMA" build tests/kama.json --target WASM -o tests/out/web/windowtests.
     tail -20 tests/out/build-web.log
     failed=1
 else
-    # Under `kama run`, Firefox among the browsers: the cases that need the driver are skipped, each saying so.
+    # Under `kama run`, Firefox among the browsers, at a device scale of 1.5: the cases that need trusted input are
+    # skipped, each saying so (kama's KR-378). The scale cases run, so a run that skips one has failed to set the scale.
     if browsers="$(node tools/browsers.mjs run 2>/dev/null)"; then
         while IFS= read -r browser; do
-            echo "-- kama run, $browser"
-            KAMA_BROWSER="$browser" bounded "$KAMA" run tests/kama.json --target WASM --headless || failed=1
+            echo "-- kama run, $browser, at a device scale of 1.5"
+            log="tests/out/kama-run.log"
+            KAMA_BROWSER="$browser" bounded "$KAMA" run tests/kama.json --target WASM --headless --scale 1.5 \
+                --window 1280x1024 > "$log" 2>&1 || failed=1
+            cat "$log"
+            if grep -q "needs a device scale of 1.5" "$log"; then
+                echo "FAIL the run at a device scale of 1.5 skipped a scale case: the page was not at that scale"
+                failed=1
+            fi
         done <<< "$browsers"
     else
         echo "skip no browser for kama run (Edge or Chrome installed, or Firefox pinned under ~/browsers; or set KAMA_BROWSER)"
@@ -88,8 +96,8 @@ else
             log="tests/out/driver-run.log"
             node tools/webtest.mjs tests/out/web "windowtests.html?arg=--driver" --browser "$browser" > "$log" 2>&1 || failed=1
             cat "$log"
-            if grep -q "(kyoten's KY-52)\|(kama's KR-378)" "$log"; then
-                echo "FAIL the driver's run skipped a case that waits on the driver: the program did not see --driver"
+            if grep -q "needs a device scale of 1.5\|(kama's KR-378)" "$log"; then
+                echo "FAIL the driver's run skipped a case: the program did not see --driver, or the page its scale"
                 failed=1
             fi
         done <<< "$browsers"

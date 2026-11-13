@@ -11,13 +11,15 @@ same `Event`s and methods. Where a platform cannot, the SPEC says so for that pl
 <a id="retire-driver"></a>
 ## WIN-24: the driver retired
 
-`tools/webtest.mjs` is a stopgap (AGENTS.window.md item 10). It performs the trusted input and sets the device scale
-the browser leg's driver cases need, and it is how the pinned Chrome for Testing runs the leg at all. It goes when
-`kama run --target WASM` does all three: trusted input (kama's KR-378, for which this package's `webtest:` requests are
-one shape), a device scale (kyoten's KY-52), and a page loaded in the pinned Chrome for Testing (kyoten's KY-53), or a
-pinned Chromium that loads one. Then every case runs under `kama run` in every browser; Firefox's own input (a wheel in
-lines, the order of its pointer lock and focus events) is measured there; and `driven()`, the page's `?arg=--driver`
-and the driver's guard go. `@kama/gpu`'s copy of the driver goes with the third (its AGENTS.gpu.md item 11).
+`tools/webtest.mjs` is a stopgap (AGENTS.window.md item 10). It performs the trusted input the browser leg's driver
+cases need, and it is how the pinned Chrome for Testing runs the leg at all. The device scale moved to
+`kama run --scale 1.5` on 2026-11-12 (kama 0.9.938). The driver goes when `kama run --target WASM` does the other two:
+trusted input (kama's KR-378, for which this package's `webtest:` requests are one shape), and a page loaded in the
+pinned Chrome for Testing, or a pinned Chromium that loads one (its sandboxed network service crashes in a full
+headless session, which kama now reports by name). Then every case runs under `kama run` in every browser; Firefox's
+own input (a wheel in lines, the order of its pointer lock and focus events) is measured there; and `driven()`, the
+page's `?arg=--driver` and the driver's guard go. `@kama/gpu`'s copy of the driver goes with the second (its
+AGENTS.gpu.md item 11).
 
 <a id="pointer-samples"></a>
 ## WIN-19: every pointer sample

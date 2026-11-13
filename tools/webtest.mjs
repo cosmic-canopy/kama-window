@@ -3,9 +3,9 @@
 // which passes `--driver` (`?arg=--driver`), sets a device scale of 1.5 and performs trusted input. node 22 or later,
 // for its built-in WebSocket; no npm packages.
 //
-// STOPGAP: every other browser runs the leg under `kama run --target WASM` (tools/test.sh), skipping what needs this
-// driver. It stays for trusted input until `kama run` gives it (kama's KR-378), for a device scale (kyoten's KY-52), and
-// for the pinned Chrome for Testing, which never loads a page under `kama run` (kyoten's KY-53).
+// STOPGAP: every other browser runs the leg under `kama run --target WASM --scale 1.5` (tools/test.sh), skipping what
+// needs trusted input. This driver stays for trusted input until `kama run` gives it (kama's KR-378), and for the pinned
+// Chrome for Testing, which never loads a page under `kama run`: its sandboxed network service crashes there.
 //
 //   node tools/webtest.mjs <dir> <page.html[?query]> [--browser <path>] [--timeout <seconds>]
 //   node tools/webtest.mjs --list         # the browsers it runs in (tools/browsers.mjs driver), or exit 3 when none

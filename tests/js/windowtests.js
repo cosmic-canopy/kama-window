@@ -85,6 +85,9 @@ mergeInto(LibraryManager.library, {
   // The last request tools/webtest.mjs has done (its `windowtestsAck`).
   windowtests_acked: function () { return (globalThis.windowtestsAck | 0); },
 
+  // The page's device scale, which `kama run --scale` and the driver set (1.5 in both of this package's runs).
+  windowtests_device_scale: function () { return typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1; },
+
   // A size report handed to the window on `sel` as its ResizeObserver or its `matchMedia` query would make one: the
   // CSS size, the pixels and the device pixel ratio. A real change of the ratio (another display, the page's zoom)
   // cannot be made headless, and the DevTools protocol's emulation did not reach the page's query (2026-11-11), so the

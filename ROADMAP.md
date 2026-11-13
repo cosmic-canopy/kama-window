@@ -19,7 +19,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 
 | id | item | why |
 |---|---|---|
-| WIN-24 | **The driver retired**: trusted input, a device scale and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
+| WIN-24 | **The driver retired**: trusted input and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 

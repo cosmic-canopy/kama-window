@@ -1,8 +1,9 @@
 file @compileFor(ARCH_WASM32);
 // WIN-3: a window on a canvas (AGENTS.window.md item 8). Under node there is no page, and opening refuses. In a browser
-// the window opens on #canvas (tests/web/shell.html), in one of two runs (AGENTS.window.md item 10): under
-// `kama run --target WASM`, or under tools/webtest.mjs, the driver, which passes `--driver`, sets a device scale of 1.5
-// and performs trusted input. Without the driver, the cases that need either are skipped, each saying so. Then:
+// the window opens on #canvas (tests/web/shell.html), in one of two runs (AGENTS.window.md item 10), each at a device
+// scale of 1.5: under `kama run --target WASM --scale 1.5`, or under tools/webtest.mjs, the driver, which passes
+// `--driver` and performs trusted input. Without the driver, the cases that need trusted input are skipped, and at
+// another scale the scale cases, each saying so. Then:
 // - `webWindow` holds what follows at once: DOM events dispatched at the page's elements, the web's equivalent of the
 //   Win32 messages natively, reach the window's listeners before the dispatch returns, and `pump()` takes them;
 // - `webFinish` holds what takes the browser's own time or input: a resize, which the ResizeObserver reports between
@@ -36,9 +37,13 @@ extern fn int32 windowtests_attr_is(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cc
 extern fn void windowtests_set_style(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> prop, UnsafeConstPtr<cchar> value);
 extern fn void windowtests_backing(UnsafeConstPtr<cchar> sel, UnsafePtr<int32> width, UnsafePtr<int32> height);
 extern fn int32 windowtests_acked();
+extern fn float64 windowtests_device_scale();
 extern fn int32 windowtests_locked(UnsafeConstPtr<cchar> sel);
 extern fn int32 windowtests_report_sizes(UnsafeConstPtr<cchar> sel, float64 width, float64 height, int32 fw, int32 fh,
                                          float64 scale);
+
+// The frames the window on #widthonly must hold still through: the run without the driver reaches its hold after 42.
+comptime int32 HOLD_TICKS = 30;
 
 // ---- the page --------------------------------------------------------------------------------------------------------
 
@@ -130,8 +135,8 @@ unsafe fn void check(ref Tally t, const ref string name, bool ok, const ref stri
     if (ok) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: why); }
 }
 
-// Whether tools/webtest.mjs runs the program (`--driver`): it sets a device scale of 1.5 and performs trusted input,
-// neither of which a page can do itself, nor `kama run` yet (kama's KR-378, kyoten's KY-52).
+// Whether tools/webtest.mjs runs the program (`--driver`): it performs trusted input, which a page cannot do itself, nor
+// `kama run` yet (kama's KR-378).
 unsafe fn bool driven() {
     Args a = args();
     int32 i = 0;
@@ -144,11 +149,16 @@ unsafe fn bool driven() {
     return false;
 }
 
-// A case written for the driver's device scale of 1.5, where pixels are not CSS pixels. Without the driver the page is at
-// the display's own scale, 1 headless, where the case would say nothing, so it is skipped, saying so.
+// Whether the page is at the device scale of 1.5 the scale cases are written for, where pixels are not CSS pixels: both
+// of this package's runs set it (`kama run --scale 1.5`, and the driver). At the display's own scale, 1 headless, the
+// cases would say nothing.
+unsafe fn bool atTestScale() { return windowtests_device_scale() == 1.5; }
+
+// A case written for a device scale of 1.5: skipped, saying so, at any other.
 unsafe fn void scaledCheck(ref Tally t, const ref string name, bool ok, const ref string why) {
-    if (driven()) { check(t: t, name: name, ok: ok, why: why); return; }
-    println(s: "skip ${name}: it needs the driver's device scale of 1.5, which `kama run` cannot set (kyoten's KY-52)");
+    if (atTestScale()) { check(t: t, name: name, ok: ok, why: why); return; }
+    float64 scale = windowtests_device_scale();
+    println(s: "skip ${name}: it needs a device scale of 1.5, and the page is at ${scale} (`kama run --scale 1.5`)");
 }
 
 // What the queue holds after a pump.
@@ -665,6 +675,8 @@ type resource WebRun implements App {
     int32 awaited = 0;
     int32 settle = 0;
     int32 ticks = 0;
+    bool held = false;       // the one-axis hold was checked: every run reaches it, with the driver or without
+    bool holdNext = false;   // without the driver, the hold follows step 3
 
     public ctor make(Tally tally, Window window, Window steady) {
         this.tally = give tally;
@@ -697,12 +709,20 @@ type resource WebRun implements App {
     }
 
     unsafe fn bool done() {
+        if (!this.held) {
+            int32 at = this.step;
+            this.tally.verdict(name: "the browser's steps reach the one-axis hold", why: "they ended at step ${at}");
+        }
         uint8 code = summary(t: this.tally);
         quit(code: code);
         return false;
     }
 
     unsafe fn bool run() {
+        if (this.holdNext) {
+            this.holdCheck();
+            return this.done();
+        }
         int32 s = this.step;
         if (s == 1) {
             this.settle = 4;
@@ -726,8 +746,9 @@ type resource WebRun implements App {
                   why: "${sz.width} logical, ${px.width}×${px.height} pixels, backing ${b.width}");
             if (!driven()) {
                 println(s: "skip the trusted-input steps, a real click, keys, a drag, a touch and pointer lock: they need the driver (kama's KR-378)");
-                println(s: "skip a window the page sizes on one axis holds still through the browser's frames: it needs the driver's device scale of 1.5, which `kama run` cannot set (kyoten's KY-52)");
-                return this.done();
+                this.holdNext = true;   // the hold comes next, after frames enough for the page to have moved it
+                this.settle = 30;
+                return true;
             }
             this.request(what: "click #canvas 30 30");
             return true;
@@ -830,20 +851,27 @@ type resource WebRun implements App {
             string got = pumped(w: this.window);
             check(t: this.tally, name: "the browser giving the lock back sets the mode to Normal: the next click does not lock",
                   ok: !got.contains(substring: "PointerLock"), why: "got `${got}`");
-            string moved = pumped(w: this.steady);
-            Size ss = this.steady.size();
-            Size sp = this.steady.framebufferSize();
-            string sel = "#widthonly";
-            Size sb = backingOf(sel: sel);
-            int32 n = this.ticks;
-            println(s: "measured: the window on #widthonly, sized by the page on one axis, through ${n} ticks");
-            check(t: this.tally, name: "a window the page sizes on one axis holds still through the browser's frames: no Resize, the same size and pixels",
-                  ok: moved.isEmpty() && ss.width == 400 && ss.height == 200 && sp.width == 600 && sp.height == 300 &&
-                      sb.width == 600 && sb.height == 300,
-                  why: "posted `${moved}`, ${ss.width}×${ss.height} logical, ${sp.width}×${sp.height} pixels, backing ${sb.width}×${sb.height}");
+            this.holdCheck();
             return this.done();
         }
         return this.done();
+    }
+
+    // The window on #widthonly, which the page sizes on one axis, has held still through every frame so far, at least
+    // HOLD_TICKS of them (WIN-21): one that ran away did so a frame at a time.
+    unsafe fn void holdCheck() {
+        this.held = true;
+        string moved = pumped(w: this.steady);
+        Size ss = this.steady.size();
+        Size sp = this.steady.framebufferSize();
+        string sel = "#widthonly";
+        Size sb = backingOf(sel: sel);
+        int32 n = this.ticks;
+        println(s: "measured: the window on #widthonly, sized by the page on one axis, through ${n} ticks");
+        scaledCheck(t: this.tally, name: "a window the page sizes on one axis holds still through the browser's frames: no Resize, the same size and pixels",
+                    ok: n >= HOLD_TICKS && moved.isEmpty() && ss.width == 400 && ss.height == 200 && sp.width == 600 &&
+                        sp.height == 300 && sb.width == 600 && sb.height == 300,
+                    why: "through ${n} ticks, posted `${moved}`, ${ss.width}×${ss.height} logical, ${sp.width}×${sp.height} pixels, backing ${sb.width}×${sb.height}");
     }
 }
 

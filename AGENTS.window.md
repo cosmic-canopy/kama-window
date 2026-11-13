@@ -738,6 +738,24 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
       and always checking, the stepped run's test inverted, and the page passing no arguments. Four are caught only by
       the driver's guard, which is why it is there.
 
+    **Built on 2026-11-12 (kyoten's eighteenth session), decision 3 met:** kama 0.9.938 gives `kama run --target WASM
+    --scale <n> --window <w>x<h>` (kyoten's KY-52, retired), so the scale cases run under `kama run` too:
+    - **The program asks the page for its scale:** `scaledCheck` runs a case wherever the page's `devicePixelRatio` is
+      1.5 (`windowtests_device_scale`), not only under the driver, and skips it, saying so, at any other.
+    - **The run without the driver reaches the one-axis hold:** it skips the trusted-input steps, waits 30 frames, and
+      holds the window on `#widthonly` to at least 30 of them (`HOLD_TICKS`). The program fails itself if its stepped
+      run never reached the hold, since a run cut short would otherwise lose the case without a word.
+    - **The leg:** `tools/test.sh` runs `kama run … --scale 1.5 --window 1280x1024` and fails a run that skips a scale
+      case, as it fails a driver's run that skips anything. Red first: 245 cases and all 8 scale cases skipped at the
+      scale; green, 253 in Edge and in Firefox 160, the driver's 264 unchanged.
+    - **Mutations: 7 of 8 caught** (`.scratch/s18-window-mutations.log` in kyoten): the scale never 1.5 (the guard),
+      the hold never next (stuck at step 4), never marked, or skipped (the self-check), no frames before the hold (caught
+      once the case held to 30 frames: it had passed after 12), the driver at a scale of 1 (its guard), and `kama run`
+      without `--scale` (the guard). **The eighth, the scale always 1.5, is equivalent:** every run the suite makes is at
+      1.5, which both guards enforce, so the answer it overrides is always true.
+    - Chrome for Testing still loads no page under `kama run`. kama now names it after 60 s (KY-53, retired), quoting
+      its "Network service crashed", so the driver keeps it, with the trusted input KR-378 waits on (WIN-24).
+
 
 - **This package's own documents,** above: the SPEC, the ROADMAP and its detail, and the CHANGELOG.
 - **The design started as kama's:** `../kama/docs/ROADMAP_DETAIL.md` § 8, at the anchor `s8-input`. Read it before

@@ -76,6 +76,7 @@ int32_t windowtests_attr_is(const char *sel, const char *name, const char *value
 void windowtests_set_style(const char *sel, const char *prop, const char *value);
 void windowtests_backing(const char *sel, int32_t *width, int32_t *height);
 int32_t windowtests_acked(void);
+double windowtests_device_scale(void);
 int32_t windowtests_locked(const char *sel);
 int32_t windowtests_report_sizes(const char *sel, double width, double height, int32_t fw, int32_t fh, double scale);
 // The tests' own pad at browser index `slot` (WIN-4): connected or gone, standard-mapped or not, its id, `nbuttons`
