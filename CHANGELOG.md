@@ -5,6 +5,10 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- The tests program states its pace, `run(app:, pace: Pace::EveryRefresh)`, as kama 0.9.958's `std::app` asks
+  (KR-281 4g), ticking as it did; its manifest needs kama 0.9.958 or later. Green on kama 0.9.960 at the same
+  counts (2026-11-15). kama 0.9.958 also lets a window package install its own wait for an app on demand
+  (`setEventWait`, GLFW's `glfwWaitEventsTimeout` and `glfwPostEmptyEvent`), which this package does not do yet.
 - **Gamepads** (WIN-4, 2026-11-12, kama 0.9.911; AGENTS.window.md item 9). Sixteen slots per window: `Window.pad` (a
   `Gamepad`: the W3C standard gamepad's 17 buttons and 4 axes, untouched, a button pressed at 30 of 255),
   `PadConnected`, `PadDisconnected`, `PadButtonDown` and `PadButtonUp`, `padInfo`, `rumble` and `rumbleTriggers`,

@@ -12,7 +12,7 @@ file @compileFor(ARCH_WASM32);
 
 import {
     core::println, core::env::args, core::env::Args,
-    std::app::App, std::app::Lifecycle, std::app::run, std::app::quit,
+    std::app::App, std::app::Lifecycle, std::app::run, std::app::Pace, std::app::quit,
     Tally, describe, quietly, drained, expectDrained, summary, webPadCases,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Pointer, window::CursorMode,
     window::Size, window::NativeWindow, window::NativeKind,
@@ -901,6 +901,6 @@ unsafe fn uint8 webFinish(Tally t) {
         }
     };
     Owned<App> app = new WebRun.make(tally: give t, window: give opened, steady: give steady);
-    run(app: give app);
+    run(app: give app, pace: Pace::EveryRefresh);
     return 0;
 }
