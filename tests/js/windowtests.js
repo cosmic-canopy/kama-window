@@ -1,6 +1,11 @@
 // tests/js/windowtests.js: what the tests program does to the page, on the web (tests/src/web.kama). It dispatches DOM
 // events at an element, the web's equivalent of the Win32 messages natively, and reads back what the window did to it.
 // A dispatch answers 1 when the event's default was left to the page and 0 when a listener prevented it.
+//
+// The gate builds it in a release build too, which runs Closure over it (kama 0.9.966, KR-289): a name the driver or the
+// package reads is quoted, as the driver's acknowledgement and the fake pads' Gamepad keys are, and these are the file's
+// own, which tools/closure-names.mjs lets Closure rename:
+// closure-own: el at kinds sizes windows windowtestsPads windowtestsRecord count motors ms
 mergeInto(LibraryManager.library, {
   $WT__deps: ['$UTF8ToString'],
   $WT: {
@@ -82,8 +87,9 @@ mergeInto(LibraryManager.library, {
     HEAP32[height >> 2] = c.height;
   },
 
-  // The last request tools/webtest.mjs has done (its `windowtestsAck`).
-  windowtests_acked: function () { return (globalThis.windowtestsAck | 0); },
+  // The last request tools/webtest.mjs has done (its `windowtestsAck`), read by its quoted name: the driver sets it from
+  // outside the program, and a release build's Closure renamed the unquoted one, so no step was ever acknowledged.
+  windowtests_acked: function () { return (globalThis['windowtestsAck'] | 0); },
 
   // The page's device scale, which `kama run --scale` and the driver set (1.5 in both of this package's runs).
   windowtests_device_scale: function () { return typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1; },
@@ -108,7 +114,8 @@ mergeInto(LibraryManager.library, {
   // WIN-4: the tests' own pads, in place of the browser's (decision 8). The first call replaces `navigator.getGamepads`
   // with one that lists them, as a browser does, by index; each is a plain object shaped as a Gamepad, its actuator
   // recording what it is asked to play. Its buttons' `pressed` is the browser's own rule, at half their travel, so a
-  // trigger the package calls pressed at 30 of 255 can be one the browser does not.
+  // trigger the package calls pressed at 30 of 255 can be one the browser does not. Its keys are quoted, so a release
+  // build's Closure keeps them, as it keeps a browser object's: the package reads `effects` by its quoted name.
   windowtests_web_pad__deps: ['$UTF8ToString'],
   windowtests_web_pad: function (slot, connected, standard, id, buttons, nbuttons, axes, naxes, effects) {
     if (!globalThis.windowtestsPads) {
@@ -123,7 +130,7 @@ mergeInto(LibraryManager.library, {
     var bs = [], as = [];
     for (var i = 0; i < nbuttons; i++) {
       var v = HEAPF32[(buttons >> 2) + i];
-      bs.push({ pressed: v >= 0.5, touched: v > 0, value: v });
+      bs.push({ 'pressed': v >= 0.5, 'touched': v > 0, 'value': v });
     }
     for (var j = 0; j < naxes; j++) as.push(HEAPF32[(axes >> 2) + j]);
     var record = { count: 0, motors: [0, 0, 0, 0], ms: 0 };
@@ -133,15 +140,15 @@ mergeInto(LibraryManager.library, {
       if (effects & 1) kinds.push('dual-rumble');
       if (effects & 2) kinds.push('trigger-rumble');
       actuator = {
-        effects: kinds,
-        playEffect: function (type, params) {
+        'effects': kinds,
+        'playEffect': function (type, params) {
           record.count += 1;
           if (type === 'dual-rumble') { record.motors[0] = params.strongMagnitude; record.motors[1] = params.weakMagnitude; }
           else { record.motors[2] = params.leftTrigger; record.motors[3] = params.rightTrigger; }
           record.ms = params.duration;
           return Promise.resolve('complete');
         },
-        reset: function () {
+        'reset': function () {
           record.count += 1;
           record.motors = [0, 0, 0, 0];
           record.ms = -1;   // a reset, told apart from an effect of no strength
@@ -150,8 +157,8 @@ mergeInto(LibraryManager.library, {
       };
     }
     pads[slot] = {
-      index: slot, id: UTF8ToString(id), connected: true, mapping: standard ? 'standard' : '', buttons: bs, axes: as,
-      timestamp: performance.now(), vibrationActuator: actuator, windowtestsRecord: record,
+      'index': slot, 'id': UTF8ToString(id), 'connected': true, 'mapping': standard ? 'standard' : '', 'buttons': bs,
+      'axes': as, 'timestamp': performance.now(), 'vibrationActuator': actuator, windowtestsRecord: record,
     };
   },
 

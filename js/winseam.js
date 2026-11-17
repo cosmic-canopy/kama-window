@@ -11,6 +11,16 @@
 // Each window's queue keeps the ring's promises (decision 1): one pointer's moves coalesce, scrolls of one unit sum, the
 // sizes keep the last, and past CAP records an event is counted into a `Dropped` record where it happened, except an up,
 // a cancel, a focus change, a pointer lock and the sizes, which go on to HARD so a key is never left held.
+//
+// A release build runs Closure over this file (kama 0.9.966, KR-289), which renames every name it cannot prove the
+// browser's. A name the browser or the page reads is quoted, so it keeps its name. These are the file's own, which
+// nothing outside the program reads, and the gate (tools/closure-names.mjs) holds every other name to its release build:
+// closure-own: CAP HARD KEY_DOWN KEY_UP TEXT POINTER_MOVE POINTER_DOWN POINTER_UP POINTER_CANCEL POINTER_ENTER
+// closure-own: POINTER_LEAVE SCROLL FOCUS POINTER_LOCK DROPPED SIZES windows canvases codeTable codes table hidOf
+// closure-own: buttonBits mods typed
+// closure-own: pointerKind close put pull write pointer pointerMove pointerDown pointerButton requestLock lockChanged
+// closure-own: setCursor follows measure sizes watchScale observed pads record last lockWanted insets sized fw fh
+// closure-own: observer saved sizedByPage primary fn
 
 mergeInto(LibraryManager.library, {
   $WinSeam__deps: ['$UTF8ToString'],
@@ -25,25 +35,41 @@ mergeInto(LibraryManager.library, {
 
     // The DOM's `KeyboardEvent.code` to the USB HID usage id `Key` is numbered by: every key `Key` names. A code not
     // here is `Key::Unknown` (0), whose default the window leaves to the page.
-    codes: {
-      KeyA: 4, KeyB: 5, KeyC: 6, KeyD: 7, KeyE: 8, KeyF: 9, KeyG: 10, KeyH: 11, KeyI: 12, KeyJ: 13, KeyK: 14, KeyL: 15,
-      KeyM: 16, KeyN: 17, KeyO: 18, KeyP: 19, KeyQ: 20, KeyR: 21, KeyS: 22, KeyT: 23, KeyU: 24, KeyV: 25, KeyW: 26,
-      KeyX: 27, KeyY: 28, KeyZ: 29,
-      Digit1: 30, Digit2: 31, Digit3: 32, Digit4: 33, Digit5: 34, Digit6: 35, Digit7: 36, Digit8: 37, Digit9: 38,
-      Digit0: 39,
-      Enter: 40, Escape: 41, Backspace: 42, Tab: 43, Space: 44, Minus: 45, Equal: 46, BracketLeft: 47, BracketRight: 48,
-      Backslash: 49, IntlHash: 50, Semicolon: 51, Quote: 52, Backquote: 53, Comma: 54, Period: 55, Slash: 56,
-      CapsLock: 57,
-      F1: 58, F2: 59, F3: 60, F4: 61, F5: 62, F6: 63, F7: 64, F8: 65, F9: 66, F10: 67, F11: 68, F12: 69,
-      PrintScreen: 70, ScrollLock: 71, Pause: 72, Insert: 73, Home: 74, PageUp: 75, Delete: 76, End: 77, PageDown: 78,
-      ArrowRight: 79, ArrowLeft: 80, ArrowDown: 81, ArrowUp: 82,
-      NumLock: 83, NumpadDivide: 84, NumpadMultiply: 85, NumpadSubtract: 86, NumpadAdd: 87, NumpadEnter: 88,
-      Numpad1: 89, Numpad2: 90, Numpad3: 91, Numpad4: 92, Numpad5: 93, Numpad6: 94, Numpad7: 95, Numpad8: 96,
-      Numpad9: 97, Numpad0: 98, NumpadDecimal: 99, IntlBackslash: 100, ContextMenu: 101, NumpadEqual: 103,
-      F13: 104, F14: 105, F15: 106, F16: 107, F17: 108, F18: 109, F19: 110, F20: 111, F21: 112, F22: 113, F23: 114,
-      F24: 115,
-      ControlLeft: 224, ShiftLeft: 225, AltLeft: 226, MetaLeft: 227, ControlRight: 228, ShiftRight: 229, AltRight: 230,
-      MetaRight: 231,
+    //
+    // The browser's own strings look the table up, so its keys are quoted, and a release build's Closure keeps them; it
+    // renamed every unquoted one, so every key read as Unknown. The table is made by a function: emscripten writes this
+    // library object back with its own keys unquoted, but keeps a function's body as written.
+    codeTable: function () {
+      return {
+        'KeyA': 4, 'KeyB': 5, 'KeyC': 6, 'KeyD': 7, 'KeyE': 8, 'KeyF': 9, 'KeyG': 10, 'KeyH': 11, 'KeyI': 12,
+        'KeyJ': 13, 'KeyK': 14, 'KeyL': 15, 'KeyM': 16, 'KeyN': 17, 'KeyO': 18, 'KeyP': 19, 'KeyQ': 20, 'KeyR': 21,
+        'KeyS': 22, 'KeyT': 23, 'KeyU': 24, 'KeyV': 25, 'KeyW': 26, 'KeyX': 27, 'KeyY': 28, 'KeyZ': 29,
+        'Digit1': 30, 'Digit2': 31, 'Digit3': 32, 'Digit4': 33, 'Digit5': 34, 'Digit6': 35, 'Digit7': 36, 'Digit8': 37,
+        'Digit9': 38, 'Digit0': 39,
+        'Enter': 40, 'Escape': 41, 'Backspace': 42, 'Tab': 43, 'Space': 44, 'Minus': 45, 'Equal': 46, 'BracketLeft': 47,
+        'BracketRight': 48, 'Backslash': 49, 'IntlHash': 50, 'Semicolon': 51, 'Quote': 52, 'Backquote': 53, 'Comma': 54,
+        'Period': 55, 'Slash': 56, 'CapsLock': 57,
+        'F1': 58, 'F2': 59, 'F3': 60, 'F4': 61, 'F5': 62, 'F6': 63, 'F7': 64, 'F8': 65, 'F9': 66, 'F10': 67, 'F11': 68,
+        'F12': 69,
+        'PrintScreen': 70, 'ScrollLock': 71, 'Pause': 72, 'Insert': 73, 'Home': 74, 'PageUp': 75, 'Delete': 76,
+        'End': 77, 'PageDown': 78,
+        'ArrowRight': 79, 'ArrowLeft': 80, 'ArrowDown': 81, 'ArrowUp': 82,
+        'NumLock': 83, 'NumpadDivide': 84, 'NumpadMultiply': 85, 'NumpadSubtract': 86, 'NumpadAdd': 87,
+        'NumpadEnter': 88,
+        'Numpad1': 89, 'Numpad2': 90, 'Numpad3': 91, 'Numpad4': 92, 'Numpad5': 93, 'Numpad6': 94, 'Numpad7': 95,
+        'Numpad8': 96, 'Numpad9': 97, 'Numpad0': 98, 'NumpadDecimal': 99, 'IntlBackslash': 100, 'ContextMenu': 101,
+        'NumpadEqual': 103,
+        'F13': 104, 'F14': 105, 'F15': 106, 'F16': 107, 'F17': 108, 'F18': 109, 'F19': 110, 'F20': 111, 'F21': 112,
+        'F22': 113, 'F23': 114, 'F24': 115,
+        'ControlLeft': 224, 'ShiftLeft': 225, 'AltLeft': 226, 'MetaLeft': 227, 'ControlRight': 228, 'ShiftRight': 229,
+        'AltRight': 230, 'MetaRight': 231,
+      };
+    },
+    codes: null,   // codeTable()'s answer, made on first use
+    table: function () { return WinSeam.codes || (WinSeam.codes = WinSeam.codeTable()); },
+    hidOf: function (code) {
+      var codes = WinSeam.table();
+      return Object.prototype.hasOwnProperty.call(codes, code) ? codes[code] : 0;
     },
 
     // A W3C `button` to its bit in `buttons`, which numbers them otherwise (right is 2, middle 4).
@@ -213,7 +239,7 @@ mergeInto(LibraryManager.library, {
     // A key the window names has its default prevented (decision 5): Space does not scroll, Tab does not leave, F5 does
     // not reload. `Key::Unknown` is left to the page. Text comes from the keydown's `key`, after the key.
     key: function (win, e, down) {
-      var S = WinSeam, hid = S.codes[e.code] || 0;
+      var S = WinSeam, hid = S.hidOf(e.code);
       if (hid !== 0) e.preventDefault();
       S.put(win, { kind: down ? S.KEY_DOWN : S.KEY_UP, a: hid, b: S.mods(e), c: down && e.repeat ? 1 : 0 });
       if (!down) return;
@@ -447,7 +473,8 @@ mergeInto(LibraryManager.library, {
     var m = /Vendor: ([0-9a-f]{4}) Product: ([0-9a-f]{4})/i.exec(id) || /^([0-9a-f]{1,4})-([0-9a-f]{1,4})-/i.exec(id);
     var caps = 0, actuator = p.vibrationActuator;
     if (actuator) {
-      var effects = actuator.effects || (actuator.type ? [actuator.type] : []);
+      // `effects` is read by its quoted name: Closure has no declaration of it, and renamed it in a release build.
+      var effects = actuator['effects'] || (actuator.type ? [actuator.type] : []);
       if (effects.indexOf('dual-rumble') >= 0) caps |= 1;
       if (effects.indexOf('trigger-rumble') >= 0) caps |= 2;
     }
@@ -485,8 +512,8 @@ mergeInto(LibraryManager.library, {
   winseam_web_code_to_hid__deps: ['$WinSeam', '$UTF8ToString'],
   winseam_web_code_to_hid: function (code) {
     var c = UTF8ToString(code);
-    return Object.prototype.hasOwnProperty.call(WinSeam.codes, c) ? WinSeam.codes[c] : 0;
+    return WinSeam.hidOf(c);
   },
   winseam_web_code_count__deps: ['$WinSeam'],
-  winseam_web_code_count: function () { return Object.keys(WinSeam.codes).length; },
+  winseam_web_code_count: function () { return Object.keys(WinSeam.table()).length; },
 });

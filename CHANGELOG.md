@@ -5,6 +5,12 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Fixed: a release build for the web lost its keyboard and a pad's rumble effects under Closure** (2026-11-17, kama
+  0.9.966; AGENTS.window.md item 11). kama 0.9.966 runs Closure over a wasm release (KR-289). Closure renamed the
+  DOM-code table's keys, so every key reached a program as `Key::Unknown`, and a pad's `effects`, so its trigger rumble
+  went unreported. The table is now made by a function with its keys quoted, and `effects` is read by its quoted name.
+  A program needs no change. The gate now runs every wasm leg in a release build too, and `tools/closure-names.mjs`
+  holds the page's names to it.
 - The tests program states its pace, `run(app:, pace: Pace::EveryRefresh)`, as kama 0.9.958's `std::app` asks
   (KR-281 4g), ticking as it did; its manifest needs kama 0.9.958 or later. Green on kama 0.9.960 at the same
   counts (2026-11-15). kama 0.9.958 also lets a window package install its own wait for an app on demand

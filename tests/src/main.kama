@@ -249,7 +249,17 @@ unsafe fn void systemWindow(ref Tally t) {
     };
 }
 
+// What this program was built as, which its run prints first, so the gate holds each leg to the build it names: a release
+// leg that lost its `--release` says `debug`, and fails, rather than passing as a release leg that tested no release build
+// (a wasm release runs Closure over the page's JS since kama 0.9.966, KR-289).
+@compileFor(RELEASE)
+fn string buildKind() { return "release"; }
+@compileFor(DEBUG)
+fn string buildKind() { return "debug"; }
+
 unsafe fn uint8 appMain() {
+    string built = buildKind();
+    println(s: "build: ${built}");
     Tally t = Tally.make();
     noSystemPads();
     queueOrder(t: t);

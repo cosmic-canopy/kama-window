@@ -756,6 +756,50 @@ Wayland, Cocoa). kama reviewed this list on 2026-11-08 (`../kama-notes-for-kyote
     - Chrome for Testing still loads no page under `kama run`. kama now names it after 60 s (KY-53, retired), quoting
       its "Network service crashed", so the driver keeps it, with the trusted input KR-378 waits on (WIN-24).
 
+11. **Built on 2026-11-17: the web half under Closure, and every leg in a release build too** (kama 0.9.966, kyoten's
+    thirty-second session). kama 0.9.966 (KR-289) runs Closure over a wasm release, and Closure renames every property
+    name it cannot prove the browser's. No leg had built a wasm release, so nothing here had met Closure. **Decided by the
+    owner the same day** (kyoten's rendering.md § Decided, "(A) Debug + release"): every wasm leg runs debug and release,
+    as the native legs do.
+    - **Found by the release legs, red first on 0.9.966, none of it on 0.9.965:**
+      - **The DOM-code table's 119 keys were renamed, so every key read as `Key::Unknown`.** The node leg failed 119
+        cases, and each browser's run 131, with no key reaching a program as itself. Quoting the keys was not enough:
+        emscripten writes a `$` library object's own literal back with its keys unquoted, and keeps only a function's
+        body as written. So the table is made by a function, `codeTable()`, its keys quoted, on first use (`table()`,
+        `hidOf()`).
+      - **A pad's `effects` (the haptic actuator's list) was renamed:** Closure has no declaration of it, so a real pad's
+        trigger rumble would have gone unreported. It is read as `actuator['effects']`.
+      - **The tests' own JS:** the driver's acknowledgement, `globalThis.windowtestsAck`, which the driver sets from
+        outside the program, was renamed, so the release driver run hung at its trusted-input steps. It is read by its
+        quoted name. The fake pads' keys, which stand in for a browser's, are quoted as a browser object's are found.
+    - **The legs** (`tools/test.sh`): natively, debug and release as before; the wasm leg under node, debug and release;
+      the page built debug and release, each run under `kama run` in Edge and Firefox and through the driver in Chrome
+      for Testing.
+      - **Each run says its build first** (`build: debug` or `build: release`, from a `@compileFor` pair in
+        `tests/src/main.kama`), and the gate fails a leg whose program says another.
+      - **A release build's JS that still names emscripten's `UTF8ToString` was not run through Closure,** and fails
+        (a root manifest's `"release": { "closure": false }` would do that).
+    - **`tools/closure-names.mjs`** reads both JS files against the release page: every name they write or read, and
+      every quoted one, must be in the build, but for each file's own names, listed on its `// closure-own:` lines.
+      - **A name a later change adds is held by default:** a browser's name must survive, and the file's own fails until
+        it is listed.
+      - **It is the second check, not the first:** it reads the build for each name as a word, so a name renamed in one
+        place but written elsewhere passes, as the fake pads' `effects` did. It holds what no headless case reaches: a
+        pad's rumble, pointer lock's raw motion.
+    - **The counts, on 0.9.966:**
+      - natively, 249 cases, debug and release;
+      - under node, 163, debug and release;
+      - under `kama run` in Edge and Firefox, 253, debug and release;
+      - through the driver, 264, debug and release.
+    - **Mutations: 11 of 11 caught,** each a whole gate on kama 0.9.966 (kyoten's `.scratch/s32/window/mutations/`):
+      - a code key unquoted, and the driver's acknowledgement unquoted;
+      - `effects` unquoted in the package, and in the package and the fake alike. **The second is caught by the names
+        check alone:** Closure renamed both sides alike, so every case in every leg passed, while a real pad's
+        `effects` would not have been read;
+      - the `closure-own` list missing a name, and naming one the file no longer uses;
+      - each release leg built or run as debug, under node, under `kama run` and through the driver;
+      - Closure turned off in the tests' manifest; and the program saying `debug` in a release build.
+
 
 - **This package's own documents,** above: the SPEC, the ROADMAP and its detail, and the CHANGELOG.
 - **The design started as kama's:** `../kama/docs/ROADMAP_DETAIL.md` § 8, at the anchor `s8-input`. Read it before
