@@ -10,15 +10,17 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-25**
+**Next id: WIN-27**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: waiting on kama; kyoten's order goes on in `@kama/gpu` (GPU-4)
+## NOW: what kyoten's input (its first slice's step 8) needs, then waiting on kama
 
 | id | item | why |
 |---|---|---|
+| WIN-25 | **A key's and a button's name**: `Key`, `PadButton`, `PadAxis` and `PointerButton` read and written by their case names, as a bindings record names them | [detail](ROADMAP_DETAIL.md#control-names) |
+| WIN-26 | **Each event's time**, on kama's monotonic clock, the best its backend has | [detail](ROADMAP_DETAIL.md#event-times) |
 | WIN-24 | **The driver retired**: trusted input and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
