@@ -1,0 +1,628 @@
+// WIN-26: each event's time, on kama's monotonic clock (`std::time`'s `Instant`). On a headless window, on every leg:
+// a posted event keeps the time it is posted with, coalescing keeps the newest's, a `Dropped` the first it counts, what
+// the window makes takes its cause's time, and a call's releases the call's. Natively, on a hidden system window driven
+// by Win32 messages: each event at the moment its callback ran. In a browser, on the page's canvas: a DOM event's own
+// `timeStamp`, two events a known delay apart keeping it, and a pad's `Gamepad.timestamp`, each held to the pumps.
+
+import {
+    core::println, core::env::envOr,
+    std::time::Instant, std::time::Duration, std::time::monotonicNow,
+    Tally, describe, quietly, drained,
+    window::Window, window::WindowError, window::Event, window::TimedEvent, window::Key, window::PointerButton,
+    window::Pointer, window::PointerKind, window::ScrollUnit, window::Gamepad, window::PadButton, window::CursorMode,
+    window::NativeWindow, window::Size,
+};
+export { timeCases, timeSystem, webTimeCases };
+
+extern "winseam.h";
+extern fn void winseam_pads_from_system(int32 on);
+extern fn void winseam_system_pad(int32 slot, int32 connected, UnsafeConstPtr<float32> buttons,
+                                  UnsafeConstPtr<float32> axes, UnsafeConstPtr<cchar> name, int32 vendor, int32 product,
+                                  UnsafeConstPtr<cchar> serial, UnsafeConstPtr<cchar> id, int32 caps);
+
+extern "hooks.h";
+extern fn int32 windowtests_win32();
+extern fn int32 windowtests_send_key(UnsafePtr hwnd, int32 vk, int32 up);
+extern fn int32 windowtests_send_focus(UnsafePtr hwnd, int32 focused);
+extern fn int32 windowtests_send_char(UnsafePtr hwnd, int32 codepoint);
+extern fn int32 windowtests_send_mouse_move(UnsafePtr hwnd, int32 x, int32 y);
+extern fn int32 windowtests_send_wheel(UnsafePtr hwnd, int32 delta);
+extern fn int32 windowtests_send_close(UnsafePtr hwnd);
+extern fn int32 windowtests_resize(UnsafePtr hwnd, int32 width, int32 height);
+extern fn void windowtests_shown_next(int32 shown);
+extern fn int32 windowtests_key(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> type, UnsafeConstPtr<cchar> code,
+                                UnsafeConstPtr<cchar> key, int32 mods, int32 repeat);
+extern fn void windowtests_web_pad(int32 slot, int32 connected, int32 standard, UnsafeConstPtr<cchar> id,
+                                   UnsafeConstPtr<float32> buttons, int32 nbuttons, UnsafeConstPtr<float32> axes,
+                                   int32 naxes, int32 effects);
+extern fn void windowtests_web_pad_at(int32 slot, float64 ms);
+extern fn int32 windowtests_pointer(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> type, int32 id, int32 kind,
+                                    float64 x, float64 y, int32 button, int32 buttons, float32 pressure,
+                                    float32 tilt_x, float32 tilt_y, float32 twist, float32 width, float32 height,
+                                    int32 primary);
+extern fn int32 windowtests_wheel(UnsafeConstPtr<cchar> sel, float64 dx, float64 dy, int32 mode);
+extern fn void windowtests_focus(UnsafeConstPtr<cchar> sel);
+extern fn int32 windowtests_report_sizes(UnsafeConstPtr<cchar> sel, float64 width, float64 height, int32 fw, int32 fh,
+                                         float64 scale);
+
+// A time `n` milliseconds past an arbitrary start, for posting: a posted time is kept exactly as given.
+fn Instant ms(int64 n) { return Instant.of(rawNanos: 5000000000ui64 + cast<uint64>(n) * 1000000ui64); }
+
+// The next event, its text and its time; `why` empty when both are wanted.
+unsafe fn void expectAt(ref Tally t, ref Window w, const ref string name, const ref string want, Instant wantAt) {
+    Optional<TimedEvent> e = w.pollEvent();
+    string why = "";
+    match (e) {
+        case Some(value: v): {
+            string got = describe(e: v.event);
+            uint64 gotAt = v.at.rawNanos;
+            uint64 wantNs = wantAt.rawNanos;
+            if (got != want) { why = "got `" + got + "`, not `" + want + "`"; }
+            else if (gotAt != wantNs) { why = "at ${gotAt} ns, not ${wantNs}"; }
+        }
+        case None: { why = "no event, not `" + want + "`"; }
+    };
+    t.verdict(name: name, why: why);
+}
+
+// The next event, its text, and its time from `from` to `to`, both included; `seen` takes its time.
+unsafe fn void expectWithin(ref Tally t, ref Window w, const ref string name, const ref string want, Instant from,
+                            Instant to, ref Instant seen) {
+    Optional<TimedEvent> e = w.pollEvent();
+    string why = "";
+    match (e) {
+        case Some(value: v): {
+            string got = describe(e: v.event);
+            uint64 gotAt = v.at.rawNanos;
+            uint64 low = from.rawNanos;
+            uint64 high = to.rawNanos;
+            seen = v.at;
+            if (got != want) { why = "got `" + got + "`, not `" + want + "`"; }
+            else if (gotAt < low || gotAt > high) { why = "at ${gotAt} ns, outside ${low} to ${high}"; }
+        }
+        case None: { why = "no event, not `" + want + "`"; }
+    };
+    t.verdict(name: name, why: why);
+}
+
+// Every event left in the queue: their text, `;`-joined, which must be `want`, each timed from `from` to `to`, and none
+// earlier than the one before it.
+unsafe fn void expectAllWithin(ref Tally t, ref Window w, const ref string name, const ref string want, Instant from,
+                               Instant to) {
+    string got = "";
+    string why = "";
+    uint64 low = from.rawNanos;
+    uint64 high = to.rawNanos;
+    uint64 previous = 0ui64;
+    bool reading = true;
+    while (reading) {
+        Optional<TimedEvent> e = w.pollEvent();
+        match (e) {
+            case Some(value: v): {
+                string one = describe(e: v.event);
+                if (got.isEmpty()) { got = copy one; } else { got = got + "; " + one; }
+                uint64 stamp = v.at.rawNanos;
+                if ((stamp < low || stamp > high) && why.isEmpty()) {
+                    why = "`" + one + "` at ${stamp} ns, outside ${low} to ${high}";
+                }
+                if (stamp < previous && why.isEmpty()) { why = "`" + one + "` is earlier than the event before it"; }
+                previous = stamp;
+            }
+            case None: { reading = false; }
+        };
+    }
+    if (why.isEmpty() && got != want) { why = "got `" + got + "`, not `" + want + "`"; }
+    t.verdict(name: name, why: why);
+}
+
+// ---- a headless window, every leg ------------------------------------------------------------------------------------
+
+// A posted event keeps the time it is posted with, an earlier one after a later one too: a replay's times are its own.
+unsafe fn void postedTimes(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false), at: ms(n: 10));
+    w.post(event: Event::Text(c: 'a'), at: ms(n: 12));
+    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0), at: ms(n: 11));
+    expectAt(t: t, w: w, name: "a posted event comes back with the time it was posted with", want: "KeyDown 4 0 false",
+             wantAt: ms(n: 10));
+    expectAt(t: t, w: w, name: "a second posted event, with its own", want: "Text 97", wantAt: ms(n: 12));
+    expectAt(t: t, w: w, name: "a posted time earlier than the one before it is kept as given", want: "KeyUp 4 0",
+             wantAt: ms(n: 11));
+}
+
+// A coalesced move or scroll takes the newest sample's time, and a resize its last's.
+unsafe fn void coalescedTimes(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    Pointer a = Pointer.at(id: 1, kind: PointerKind::Mouse, x: 1.0, y: 1.0);
+    Pointer b = Pointer.at(id: 1, kind: PointerKind::Mouse, x: 2.0, y: 2.0);
+    Pointer c = Pointer.at(id: 1, kind: PointerKind::Mouse, x: 3.0, y: 3.0);
+    w.post(event: Event::PointerMove(pointer: a, dx: 1.0, dy: 1.0), at: ms(n: 20));
+    w.post(event: Event::PointerMove(pointer: b, dx: 1.0, dy: 1.0), at: ms(n: 21));
+    w.post(event: Event::PointerMove(pointer: c, dx: 1.0, dy: 1.0), at: ms(n: 25));
+    w.post(event: Event::Scroll(dx: 0.0, dy: 1.0, unit: ScrollUnit::Lines), at: ms(n: 30));
+    w.post(event: Event::Scroll(dx: 0.0, dy: 2.0, unit: ScrollUnit::Lines), at: ms(n: 34));
+    w.post(event: Event::Resize(width: 10, height: 10), at: ms(n: 40));
+    w.post(event: Event::Resize(width: 20, height: 20), at: ms(n: 41));
+    expectAt(t: t, w: w, name: "three coalesced moves take the newest one's time", want: "PointerMove mouse1 3 3 3 3 [0]",
+             wantAt: ms(n: 25));
+    expectAt(t: t, w: w, name: "two coalesced scrolls take the newer one's time", want: "Scroll 0 3 lines",
+             wantAt: ms(n: 34));
+    expectAt(t: t, w: w, name: "two coalesced resizes take the last one's time", want: "Resize 20 20", wantAt: ms(n: 41));
+}
+
+// A full ring keeps each event's own time, and its `Dropped` takes the time of the first event it counts.
+unsafe fn void droppedTime(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    int32 i = 0;
+    while (i < 300) {
+        w.post(event: Event::Text(c: 'x'), at: ms(n: cast<int64>(100 + i)));
+        i = i + 1;
+    }
+    int32 kept = 0;
+    string wrong = "";
+    i = 0;
+    while (i < 255) {
+        Optional<TimedEvent> e = w.pollEvent();
+        match (e) {
+            case Some(value: v): {
+                Instant want = ms(n: cast<int64>(100 + i));
+                if (v.at.rawNanos == want.rawNanos) { kept = kept + 1; }
+                else if (wrong.isEmpty()) { wrong = "event ${i} at ${v.at.rawNanos} ns"; }
+            }
+            case None: { }
+        };
+        i = i + 1;
+    }
+    if (kept == 255) { t.verdict(name: "a full ring's 255 events keep each its own time", why: ""); }
+    else { t.verdict(name: "a full ring's 255 events keep each its own time", why: "${kept} kept theirs; " + wrong); }
+    expectAt(t: t, w: w, name: "a Dropped takes the time of the first event it counts", want: "Dropped 45",
+             wantAt: ms(n: 355));
+}
+
+// What a posted Focus releases takes the Focus's time: the pointer's buttons, the pad's, then the keys, then the Focus.
+unsafe fn void focusReleaseTime(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    Pointer m = Pointer.at(id: 1, kind: PointerKind::Mouse, x: 0.0, y: 0.0);
+    Pointer touch = Pointer.at(id: 5, kind: PointerKind::Touch, x: 4.0, y: 4.0);
+    Gamepad g = Gamepad.neutral();
+    g.press(button: PadButton::South);
+    w.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: false), at: ms(n: 50));
+    w.post(event: Event::PointerDown(pointer: m, button: PointerButton::Left, mods: 0), at: ms(n: 51));
+    w.post(event: Event::PointerDown(pointer: touch, button: PointerButton::Left, mods: 0), at: ms(n: 51));
+    w.postPad(slot: 0, pad: g, at: ms(n: 52));
+    w.post(event: Event::Focus(focused: false), at: ms(n: 60));
+    expectAt(t: t, w: w, name: "a held key's down, at its time", want: "KeyDown 26 0 false", wantAt: ms(n: 50));
+    expectAt(t: t, w: w, name: "a held button's down, at its time", want: "PointerDown mouse1 0 0 [1]", wantAt: ms(n: 51));
+    expectAt(t: t, w: w, name: "a touch contact's down, at its time", want: "PointerDown touch5 0 0 [1]", wantAt: ms(n: 51));
+    expectAt(t: t, w: w, name: "a posted pad's connect, at its sample's time", want: "PadConnected 0", wantAt: ms(n: 52));
+    expectAt(t: t, w: w, name: "a posted pad's down, at its sample's time", want: "PadButtonDown 0 0", wantAt: ms(n: 52));
+    expectAt(t: t, w: w, name: "a focus loss's release of a button is at the Focus's time", want: "PointerUp mouse1 0 0 [0]",
+             wantAt: ms(n: 60));
+    expectAt(t: t, w: w, name: "its cancel of a touch contact too", want: "PointerCancel touch5 [0]", wantAt: ms(n: 60));
+    expectAt(t: t, w: w, name: "its release of a pad's button too", want: "PadButtonUp 0 0", wantAt: ms(n: 60));
+    expectAt(t: t, w: w, name: "its release of a key too", want: "KeyUp 26 0", wantAt: ms(n: 60));
+    expectAt(t: t, w: w, name: "then the Focus, at its own", want: "Focus false", wantAt: ms(n: 60));
+}
+
+// A posted pad's events take its sample's time, and so does a posted pad event.
+unsafe fn void padTimes(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    Gamepad east = Gamepad.neutral();
+    east.press(button: PadButton::East);
+    w.postPad(slot: 2, pad: east, at: ms(n: 70));
+    w.postPad(slot: 2, pad: Gamepad.neutral(), at: ms(n: 75));
+    w.postPad(slot: 2, pad: Gamepad.disconnected(), at: ms(n: 80));
+    w.post(event: Event::PadConnected(slot: 3), at: ms(n: 90));
+    w.post(event: Event::PadButtonDown(slot: 3, button: PadButton::North), at: ms(n: 91));
+    expectAt(t: t, w: w, name: "a pad sample's connect, at its time", want: "PadConnected 2", wantAt: ms(n: 70));
+    expectAt(t: t, w: w, name: "its down, at its time", want: "PadButtonDown 2 1", wantAt: ms(n: 70));
+    expectAt(t: t, w: w, name: "the next sample's up, at the next sample's time", want: "PadButtonUp 2 1", wantAt: ms(n: 75));
+    expectAt(t: t, w: w, name: "an empty slot's disconnect, at its sample's time", want: "PadDisconnected 2",
+             wantAt: ms(n: 80));
+    expectAt(t: t, w: w, name: "a posted PadConnected, at its time", want: "PadConnected 3", wantAt: ms(n: 90));
+    expectAt(t: t, w: w, name: "a posted PadButtonDown, at its time", want: "PadButtonDown 3 3", wantAt: ms(n: 91));
+}
+
+// What a call makes takes the call's time: `releaseHeld`'s ups, a headless cursor's lock, the pads let go when they stop
+// being read in the background.
+unsafe fn void callTimes(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    Instant seen = ms(n: 0);
+    w.post(event: Event::KeyDown(key: Key::KeyQ, mods: 0, repeat: false), at: ms(n: 1));
+    expectAt(t: t, w: w, name: "a key held for a release", want: "KeyDown 20 0 false", wantAt: ms(n: 1));
+    Instant before = monotonicNow();
+    w.releaseHeld();
+    Instant after = monotonicNow();
+    expectWithin(t: t, w: w, name: "releaseHeld's up takes the call's time", want: "KeyUp 20 0", from: before, to: after,
+                 seen: seen);
+
+    before = monotonicNow();
+    w.setCursor(mode: CursorMode::Locked);
+    after = monotonicNow();
+    expectWithin(t: t, w: w, name: "a headless window's cursor lock takes the call's time", want: "PointerLock true",
+                 from: before, to: after, seen: seen);
+
+    w.setPadsWhenUnfocused(on: true);
+    w.post(event: Event::Focus(focused: false), at: ms(n: 2));
+    Gamepad g = Gamepad.neutral();
+    g.press(button: PadButton::West);
+    w.postPad(slot: 4, pad: g, at: ms(n: 3));
+    string ignored = drained(w: w);
+    before = monotonicNow();
+    w.setPadsWhenUnfocused(on: false);
+    after = monotonicNow();
+    expectWithin(t: t, w: w, name: "a pad let go as the background read stops, at the call's time", want: "PadButtonUp 4 2",
+                 from: before, to: after, seen: seen);
+}
+
+// A full ring keeps a slot for a held key's up: an up arriving while it overflows goes before the trailing Dropped, which
+// stays last, at a time no earlier than the up's, so the times still run in the order the events come out.
+unsafe fn void owedUpTime(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false), at: ms(n: 1));
+    int32 i = 0;
+    while (i < 300) {
+        w.post(event: Event::Text(c: 'x'), at: ms(n: cast<int64>(10 + i)));
+        i = i + 1;
+    }
+    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0), at: ms(n: 400));
+    i = 0;
+    while (i < 254) {
+        Optional<TimedEvent> skipped = w.pollEvent();
+        i = i + 1;
+    }
+    expectAt(t: t, w: w, name: "an owed up the full ring kept, at its own time", want: "KeyUp 4 0", wantAt: ms(n: 400));
+    expectAt(t: t, w: w, name: "the Dropped after it, no earlier than the up", want: "Dropped 47", wantAt: ms(n: 400));
+}
+
+// A focus loss while the cursor is locked gives the lock back, at the Focus's time.
+unsafe fn void lockFocusTime(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    w.setCursor(mode: CursorMode::Locked);
+    string ignored = drained(w: w);
+    w.post(event: Event::Focus(focused: false), at: ms(n: 30));
+    expectAt(t: t, w: w, name: "a focus loss gives the cursor's lock back, at the Focus's time", want: "PointerLock false",
+             wantAt: ms(n: 30));
+    expectAt(t: t, w: w, name: "then the Focus", want: "Focus false", wantAt: ms(n: 30));
+}
+
+unsafe fn void timeCases(ref Tally t) {
+    owedUpTime(t: t);
+    lockFocusTime(t: t);
+    postedTimes(t: t);
+    coalescedTimes(t: t);
+    droppedTime(t: t);
+    focusReleaseTime(t: t);
+    padTimes(t: t);
+    callTimes(t: t);
+}
+
+// ---- natively, a hidden system window --------------------------------------------------------------------------------
+
+@compileFor(ARCH_WASM32)
+unsafe fn void timeSystem(ref Tally t) { }
+
+// Each event at the moment its callback ran: a message sent to the window runs GLFW's callback before the send returns,
+// so its event's time falls between the moments before and after the send, and a focus loss's release takes its time.
+@compileFor(!ARCH_WASM32)
+unsafe fn void timeSystem(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip the times on a system window (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    if (windowtests_win32() != 1) { println(s: "skip the times on a system window: only Win32 answers them"); return; }
+    windowtests_shown_next(shown: 0);
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window times", width: 120, height: 80,
+                                                         options: quietly());
+    Window w = match (give opened) {
+        case Ok(value: v): give v;
+        case Err(error: e): {
+            windowtests_shown_next(shown: 1);
+            string why = e.message();
+            t.verdict(name: "a system window's key is at the moment its callback ran", why: why);
+            return;
+        }
+    };
+    w.pump();
+    string ignored = drained(w: w);
+    NativeWindow n = w.nativeHandle();
+    UnsafePtr hwnd = n.window();
+    int32 keyW = 87;   // VK 'W'
+    Instant seen = ms(n: 0);
+
+    Instant before = monotonicNow();
+    windowtests_send_key(hwnd: hwnd, vk: keyW, up: 0);
+    Instant sent = monotonicNow();
+    windowtests_send_key(hwnd: hwnd, vk: keyW, up: 1);
+    Instant sentUp = monotonicNow();
+    Instant pumpFrom = monotonicNow();
+    w.pump();
+    expectWithin(t: t, w: w, name: "a system window's key down is at the moment its callback ran",
+                 want: "KeyDown 26 0 false", from: before, to: sent, seen: seen);
+    expectWithin(t: t, w: w, name: "its key up, at its own", want: "KeyUp 26 0", from: sent, to: sentUp, seen: seen);
+
+    windowtests_send_key(hwnd: hwnd, vk: keyW, up: 0);
+    Instant held = monotonicNow();
+    windowtests_send_focus(hwnd: hwnd, focused: 0);
+    Instant lost = monotonicNow();
+    w.pump();
+    expectWithin(t: t, w: w, name: "a held key's down", want: "KeyDown 26 0 false", from: sentUp, to: held, seen: seen);
+    Instant down = seen;
+    expectWithin(t: t, w: w, name: "a system focus loss releases the key at the Focus's moment", want: "KeyUp 26 0",
+                 from: held, to: lost, seen: seen);
+    Instant released = seen;
+    expectWithin(t: t, w: w, name: "and says Focus at the same moment", want: "Focus false", from: held, to: lost,
+                 seen: seen);
+    if (released.rawNanos == seen.rawNanos && down.rawNanos <= released.rawNanos) {
+        t.verdict(name: "a system window's times run in the order its events come out", why: "");
+    } else {
+        t.verdict(name: "a system window's times run in the order its events come out",
+                  why: "down ${down.rawNanos}, release ${released.rawNanos}, Focus ${seen.rawNanos}");
+    }
+    // The system's pads are replaced for the whole run (noSystemPads): a slot set as the system would, read in the pump.
+    w.setPadsWhenUnfocused(on: true);
+    InlineArray<float32>#(17) padButtons = [0.0; 17];
+    padButtons[0] = 1.0;
+    InlineArray<float32>#(4) padAxes = [0.0; 4];
+    string padName = "times pad";
+    string none = "";
+    winseam_system_pad(slot: 7, connected: 1, buttons: addr(of: padButtons[0]), axes: addr(of: padAxes[0]),
+                       name: padName.cstr(), vendor: 0, product: 0, serial: none.cstr(), id: none.cstr(), caps: 0);
+    Instant padFrom = monotonicNow();
+    w.pump();
+    Instant padTo = monotonicNow();
+    expectAllWithin(t: t, w: w, name: "a system pad's events are at the moment the pump read it",
+                    want: "PadConnected 7; PadButtonDown 7 0", from: padFrom, to: padTo);
+    winseam_system_pad(slot: 7, connected: 0, buttons: addr(of: padButtons[0]), axes: addr(of: padAxes[0]),
+                       name: none.cstr(), vendor: 0, product: 0, serial: none.cstr(), id: none.cstr(), caps: 0);
+    w.pump();
+    string padGone = drained(w: w);
+    w.setPadsWhenUnfocused(on: false);
+
+    Instant charFrom = monotonicNow();
+    windowtests_send_char(hwnd: hwnd, codepoint: 113);
+    Instant charTo = monotonicNow();
+    w.pump();
+    expectAllWithin(t: t, w: w, name: "a typed character's Text is at the moment its callback ran", want: "Text 113",
+                    from: charFrom, to: charTo);
+    // The move starts GLFW's tracking of the mouse, and Windows posts the leave at once, since the cursor is not over a
+    // hidden window: that one is taken in the pump, at the pump's moment.
+    Instant moveFrom = monotonicNow();
+    windowtests_send_mouse_move(hwnd: hwnd, x: 10, y: 20);
+    Instant moveTo = monotonicNow();
+    w.pump();
+    Instant movePumped = monotonicNow();
+    expectWithin(t: t, w: w, name: "a mouse move's enter is at the moment its callback ran", want: "PointerEnter mouse1 [0]",
+                 from: moveFrom, to: moveTo, seen: seen);
+    expectWithin(t: t, w: w, name: "and its move", want: "PointerMove mouse1 10 20 0 0 [0]", from: moveFrom, to: moveTo,
+                 seen: seen);
+    expectAllWithin(t: t, w: w, name: "the leave Windows posts after it is at the pump's moment", want: "PointerLeave mouse1 [0]",
+                    from: moveTo, to: movePumped);
+    Instant wheelFrom = monotonicNow();
+    windowtests_send_wheel(hwnd: hwnd, delta: 120);
+    Instant wheelTo = monotonicNow();
+    w.pump();
+    expectAllWithin(t: t, w: w, name: "a wheel's Scroll is at the moment its callback ran", want: "Scroll 0 1 lines",
+                    from: wheelFrom, to: wheelTo);
+    Instant closeFrom = monotonicNow();
+    windowtests_send_close(hwnd: hwnd);
+    Instant closeTo = monotonicNow();
+    w.pump();
+    expectAllWithin(t: t, w: w, name: "a close request is at the moment its callback ran", want: "CloseRequested",
+                    from: closeFrom, to: closeTo);
+    Instant sizeFrom = monotonicNow();
+    windowtests_resize(hwnd: hwnd, width: 200, height: 150);
+    Instant sizeTo = monotonicNow();
+    w.pump();
+    Size sized = w.size();
+    string resized = "Resize ${sized.width} ${sized.height}";
+    expectAllWithin(t: t, w: w, name: "a resize the system makes is at the moment its callback ran", want: resized,
+                    from: sizeFrom, to: sizeTo);
+    windowtests_shown_next(shown: 1);
+}
+
+// ---- in a browser, the page's canvas ---------------------------------------------------------------------------------
+
+@compileFor(!ARCH_WASM32)
+unsafe fn void webTimeCases(ref Tally t, ref Window w) { }
+
+// `n` milliseconds, waited by the clock.
+@compileFor(ARCH_WASM32)
+fn void waitMs(int64 n) {
+    Instant until = monotonicNow() + Duration.fromMillis(ms: n);
+    while (monotonicNow() < until) { }
+}
+
+// `at` moved back by `nanos`: an `Instant` plus a negative `Duration` traps in std (kyoten's KAMA_GAPS).
+@compileFor(ARCH_WASM32)
+fn Instant back(Instant at, uint64 nanos) { return Instant.of(rawNanos: at.rawNanos - nanos); }
+
+// A time on the web as `performance.now()` gives it, in milliseconds, which kama's clock reads there in nanoseconds.
+@compileFor(ARCH_WASM32)
+fn float64 msOf(Instant at) { return cast<float64>(at.rawNanos) / 1000000.0; }
+
+// The DOM's own times: two key events made 30 ms apart keep the gap between them, each held between the pumps, and a
+// pad's `Gamepad.timestamp` is its events' time, held to the pump before.
+@compileFor(ARCH_WASM32)
+unsafe fn void webTimeCases(ref Tally t, ref Window w) {
+    // A record carries its time as two 32-bit halves: wait until the page is 4.4 s old, so every time below crosses
+    // 2^32 ns and the upper half is written and read.
+    while (monotonicNow().rawNanos < 4400000000ui64) { }
+    string focusSel = "#canvas";
+    windowtests_focus(sel: focusSel.cstr());
+    w.pump();
+    string ignored = drained(w: w);
+    Instant seen = ms(n: 0);
+    string canvas = "#canvas";
+    string down = "keydown";
+    string up = "keyup";
+    string code = "KeyJ";
+    string key = "j";
+
+    Instant before = monotonicNow();
+    int32 one = windowtests_key(sel: canvas.cstr(), type: down.cstr(), code: code.cstr(), key: key.cstr(), mods: 0, repeat: 0);
+    Instant made = monotonicNow();
+    waitMs(n: 30);
+    Instant waited = monotonicNow();
+    int32 two = windowtests_key(sel: canvas.cstr(), type: up.cstr(), code: code.cstr(), key: key.cstr(), mods: 0, repeat: 0);
+    Instant last = monotonicNow();
+    w.pump();
+    Instant pumped = monotonicNow();
+    // A DOM time is as fine as the browser makes it: Firefox's a millisecond, so each bound gives a millisecond.
+    Duration grain = Duration.fromMillis(ms: 1);
+    expectWithin(t: t, w: w, name: "a DOM key's time is its event's own", want: "KeyDown 13 0 false",
+                 from: back(at: before, nanos: 1000000ui64), to: made + grain, seen: seen);
+    Instant first = seen;
+    expectWithin(t: t, w: w, name: "the text it typed, at its key's time", want: "Text 106",
+                 from: back(at: before, nanos: 1000000ui64), to: made + grain, seen: seen);
+    expectWithin(t: t, w: w, name: "a key up made 30 ms later keeps its own time", want: "KeyUp 13 0",
+                 from: back(at: waited, nanos: 1000000ui64), to: last + grain, seen: seen);
+    Duration gap = seen - first;
+    int64 gapMs = gap.asMillis();
+    if (gapMs >= 29 && gapMs <= 1000) { t.verdict(name: "two DOM events 30 ms apart keep the gap", why: ""); }
+    else { t.verdict(name: "two DOM events 30 ms apart keep the gap", why: "${gapMs} ms apart"); }
+
+    // A pointer's down and up at their DOM times, two wheels coalesced at the newer one's, a size report at its moment.
+    string pdown = "pointerdown";
+    string pup = "pointerup";
+    waitMs(n: 5);   // past the pump before, so a pointer given no time of its own would fall outside the bounds
+    Instant pointerFrom = monotonicNow();
+    int32 pd = windowtests_pointer(sel: canvas.cstr(), type: pdown.cstr(), id: 1, kind: 0, x: 5.0, y: 5.0, button: 0,
+                                   buttons: 1, pressure: 0.0, tilt_x: 0.0, tilt_y: 0.0, twist: 0.0, width: 1.0,
+                                   height: 1.0, primary: 1);
+    int32 pu = windowtests_pointer(sel: canvas.cstr(), type: pup.cstr(), id: 1, kind: 0, x: 5.0, y: 5.0, button: 0,
+                                   buttons: 0, pressure: 0.0, tilt_x: 0.0, tilt_y: 0.0, twist: 0.0, width: 1.0,
+                                   height: 1.0, primary: 1);
+    Instant pointerTo = monotonicNow();
+    waitMs(n: 3);
+    int32 w1 = windowtests_wheel(sel: canvas.cstr(), dx: 0.0, dy: 100.0, mode: 0);
+    waitMs(n: 3);
+    Instant wheelFrom = monotonicNow();
+    int32 w2 = windowtests_wheel(sel: canvas.cstr(), dx: 0.0, dy: 50.0, mode: 0);
+    Instant wheelTo = monotonicNow();
+    Size css = w.size();
+    Size px = w.framebufferSize();
+    float32 scale = w.scale();
+    int32 wider = css.width + 13;
+    waitMs(n: 3);
+    Instant sizeFrom = monotonicNow();
+    windowtests_report_sizes(sel: canvas.cstr(), width: cast<float64>(wider), height: cast<float64>(css.height),
+                             fw: px.width, fh: px.height, scale: cast<float64>(scale));
+    Instant sizeTo = monotonicNow();
+    w.pump();
+    expectWithin(t: t, w: w, name: "a DOM pointer down is at its event's time", want: "PointerDown mouse1 0 0 [1]",
+                 from: back(at: pointerFrom, nanos: 1000000ui64), to: pointerTo + grain, seen: seen);
+    expectWithin(t: t, w: w, name: "its up too", want: "PointerUp mouse1 0 0 [0]",
+                 from: back(at: pointerFrom, nanos: 1000000ui64), to: pointerTo + grain, seen: seen);
+    expectWithin(t: t, w: w, name: "two wheels coalesced in the page's queue are at the newer one's time",
+                 want: "Scroll 0 -150 pixels", from: back(at: wheelFrom, nanos: 1000000ui64), to: wheelTo + grain,
+                 seen: seen);
+    string resized = "Resize ${wider} ${css.height}";
+    expectWithin(t: t, w: w, name: "a size report's Resize is at the moment it was observed", want: resized,
+                 from: back(at: sizeFrom, nanos: 1000000ui64), to: sizeTo + grain, seen: seen);
+    windowtests_report_sizes(sel: canvas.cstr(), width: cast<float64>(css.width), height: cast<float64>(css.height),
+                             fw: px.width, fh: px.height, scale: cast<float64>(scale));
+    w.pump();
+    string restored = drained(w: w);
+
+    // The canvas blurred by the page's field taking the focus, then focused again: each Focus at its DOM event's time.
+    string field = "#field";
+    waitMs(n: 5);
+    Instant blurFrom = monotonicNow();
+    windowtests_focus(sel: field.cstr());
+    Instant blurTo = monotonicNow();
+    waitMs(n: 5);
+    Instant focusFrom = monotonicNow();
+    windowtests_focus(sel: canvas.cstr());
+    Instant focusTo = monotonicNow();
+    w.pump();
+    expectWithin(t: t, w: w, name: "a blur's Focus is at its DOM event's time", want: "Focus false",
+                 from: back(at: blurFrom, nanos: 1000000ui64), to: blurTo + grain, seen: seen);
+    expectWithin(t: t, w: w, name: "a focus's too", want: "Focus true", from: back(at: focusFrom, nanos: 1000000ui64),
+                 to: focusTo + grain, seen: seen);
+
+    // A DOM event queued before a call the program makes (`releaseHeld`, here with nothing held) is taken after it, so it
+    // comes out no earlier than the call.
+    int32 queued = windowtests_key(sel: canvas.cstr(), type: down.cstr(), code: code.cstr(), key: key.cstr(), mods: 0,
+                                   repeat: 0);
+    waitMs(n: 3);
+    Instant callAt = monotonicNow();
+    w.releaseHeld();
+    w.pump();
+    Instant afterCall = monotonicNow();
+    expectWithin(t: t, w: w, name: "a DOM event taken after a call comes out no earlier than the call",
+                 want: "KeyDown 13 0 false", from: callAt, to: afterCall, seen: seen);
+    int32 queuedUp = windowtests_key(sel: canvas.cstr(), type: up.cstr(), code: code.cstr(), key: key.cstr(), mods: 0,
+                                     repeat: 0);
+    w.pump();
+    string afterKeys = drained(w: w);
+
+    // A pad, its `timestamp` set: a time between the pumps comes through as it is; a stale one is held to the pump
+    // before.
+    winseam_pads_from_system(on: 1);
+    w.setPadsWhenUnfocused(on: true);
+    InlineArray<float32>#(17) buttons = [0.0; 17];
+    InlineArray<float32>#(4) axes = [0.0; 4];
+    string id = "054c-09cc-Times Controller";
+    windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    Instant beforeFirst = monotonicNow();
+    w.pump();
+    string connected = drained(w: w);
+    Instant between = monotonicNow();
+    waitMs(n: 5);
+    buttons[3] = 1.0;
+    windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    windowtests_web_pad_at(slot: 5, ms: msOf(at: between));
+    Instant beforeSecond = monotonicNow();
+    w.pump();
+    Duration micro = Duration.fromMicros(us: 1);
+    expectWithin(t: t, w: w, name: "a pad's down is at its Gamepad.timestamp", want: "PadButtonDown 5 3",
+                 from: back(at: between, nanos: 1000ui64), to: between + micro, seen: seen);
+    Instant afterSecond = monotonicNow();
+    buttons[3] = 0.0;
+    windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    windowtests_web_pad_at(slot: 5, ms: msOf(at: beforeFirst));
+    w.pump();
+    expectWithin(t: t, w: w, name: "a stale Gamepad.timestamp is held to the pump before", want: "PadButtonUp 5 3",
+                 from: beforeSecond, to: afterSecond, seen: seen);
+
+    // A pad is read after the page's events in a pump, so a pad whose timestamp is earlier than a key taken before it
+    // comes out at the key's time: the times run in the order the events come out.
+    Instant early = monotonicNow();
+    waitMs(n: 3);
+    Instant keyFrom = monotonicNow();
+    int32 three = windowtests_key(sel: canvas.cstr(), type: down.cstr(), code: code.cstr(), key: key.cstr(), mods: 0, repeat: 0);
+    buttons[0] = 1.0;
+    windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    windowtests_web_pad_at(slot: 5, ms: msOf(at: early));
+    w.pump();
+    Instant pumpedLast = monotonicNow();
+    expectWithin(t: t, w: w, name: "a key down taken before a pad's in one pump", want: "KeyDown 13 0 false",
+                 from: back(at: keyFrom, nanos: 1000000ui64), to: pumpedLast, seen: seen);
+    Instant keyAt = seen;
+    expectWithin(t: t, w: w, name: "its text", want: "Text 106", from: keyAt, to: keyAt, seen: seen);
+    expectWithin(t: t, w: w, name: "a pad's down timestamped before the key comes out at the key's time",
+                 want: "PadButtonDown 5 0", from: keyAt, to: keyAt, seen: seen);
+    int32 four = windowtests_key(sel: canvas.cstr(), type: up.cstr(), code: code.cstr(), key: key.cstr(), mods: 0, repeat: 0);
+    w.pump();
+    string keyLetGo = drained(w: w);
+
+    // A pad whose timestamp is later than the pump that reads it is held to that pump.
+    buttons[1] = 1.0;
+    windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    Instant ahead = monotonicNow() + Duration.fromSecs(s: 5);
+    windowtests_web_pad_at(slot: 5, ms: msOf(at: ahead));
+    Instant futureFrom = monotonicNow();
+    w.pump();
+    Instant futureTo = monotonicNow();
+    expectAllWithin(t: t, w: w, name: "a Gamepad.timestamp later than the pump is held to the pump",
+                    want: "PadButtonDown 5 1", from: futureFrom, to: futureTo);
+    windowtests_web_pad(slot: 5, connected: 0, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    w.pump();
+    string gone = drained(w: w);
+    w.setPadsWhenUnfocused(on: false);
+}

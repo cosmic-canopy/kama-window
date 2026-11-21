@@ -65,6 +65,8 @@ struct winseam_window {
     int32_t lock_bits;       // CapsLock and NumLock, as the last key or button event reported them
     pad_view pads[WINSEAM_PADS];
     int32_t focused;         // the window has the focus, as its last Focus record said (a headless window starts with it)
+    uint64_t system_at;      // the newest time of an event the system sent it, or a call made (WIN-26): none goes earlier
+    int32_t ordering;        // the system's records are being taken: each is held no earlier than the one before
     int32_t pads_unfocused;  // pads are read while the window is unfocused
     struct winseam_window *next_open;   // the open system windows, which the system's pads reach, newest first
     char *selector;         // on the web, the canvas's selector, which the native handle points at; NULL otherwise
@@ -99,20 +101,48 @@ static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
     return (int32_t)n;
 }
 
+// ---- each record's time (WIN-26, winseam.h) ------------------------------------------------------------------------
+
+// The pumps' times on the web, where a record carries the browser's: a pump's start, and the one before it.
+static uint64_t g_pump_at = 0;
+static uint64_t g_pump_before = 0;
+
+// The time of an event the system sends: on the web, the browser's, held to the pumps; natively, as it was read.
+static uint64_t pump_time(uint64_t at) {
+#ifdef __EMSCRIPTEN__
+    if (at < g_pump_before) at = g_pump_before;
+    if (at > g_pump_at) at = g_pump_at;
+#endif
+    return at;
+}
+
+// The time of a call the program makes (a release, a cursor's mode): now, which the system's next events follow.
+static uint64_t call_time(winseam_window *w) {
+    uint64_t now = winseam_now();
+    if (now > w->system_at) w->system_at = now;
+    return now;
+}
+
 // ---- the ring ------------------------------------------------------------------------------------------------------
 
 static winseam_event *newest(winseam_window *w) {
     return w->count > 0 ? &w->ring[(w->head + w->count - 1) % RING] : NULL;
 }
 
-// `n` events counted into the drop: into the trailing Dropped record, or a new one in the slot kept for it.
-static void count_drop(winseam_window *w, int32_t n) {
+// `n` events counted into the drop: into the trailing Dropped record, or a new one in the slot kept for it, at `at`, the
+// time of the first event it counts.
+static void count_drop(winseam_window *w, int32_t n, uint64_t at) {
     winseam_event *last = newest(w);
     if (last != NULL && last->kind == WINSEAM_DROPPED) { last->a += n; return; }
     winseam_event d;
     memset(&d, 0, sizeof d);
     d.kind = WINSEAM_DROPPED;
     d.a = n;
+    d.at = at;
+    if (w->ordering) {   // the system's: no earlier than the record before it (WIN-26)
+        if (d.at < w->system_at) d.at = w->system_at;
+        w->system_at = d.at;
+    }
     w->ring[(w->head + w->count) % RING] = d;
     w->count += 1;
 }
@@ -129,6 +159,13 @@ static void count_drop(winseam_window *w, int32_t n) {
 //
 // 1 when `e` was stored or coalesced, 0 when it was counted into a drop.
 static int store(winseam_window *w, const winseam_event *e, int32_t owed, int kept) {
+    winseam_event ordered;
+    if (w->ordering) {   // the system's record: no earlier than the one before it, so the times run in order (WIN-26)
+        ordered = *e;
+        if (ordered.at < w->system_at) ordered.at = w->system_at;
+        w->system_at = ordered.at;
+        e = &ordered;
+    }
     winseam_event *last = newest(w);
     if (last != NULL && last->kind != WINSEAM_DROPPED && last->kind == e->kind) {
         // One pointer's moves: the newer sample, with the motion summed (AGENTS.window.md item 8, decision 2.4).
@@ -138,7 +175,11 @@ static int store(winseam_window *w, const winseam_event *e, int32_t owed, int ke
             last->dx = dx; last->dy = dy;
             return 1;
         }
-        if (e->kind == WINSEAM_SCROLL && last->a == e->a) { last->dx += e->dx; last->dy += e->dy; return 1; }
+        if (e->kind == WINSEAM_SCROLL && last->a == e->a) {
+            last->dx += e->dx; last->dy += e->dy;
+            last->at = e->at;   // the newest sample's time
+            return 1;
+        }
         if (e->kind == WINSEAM_RESIZE || e->kind == WINSEAM_SCALE_CHANGED) { *last = *e; return 1; }
     }
     if ((int64_t)w->count + 1 + owed <= RING - 1) {
@@ -147,12 +188,14 @@ static int store(winseam_window *w, const winseam_event *e, int32_t owed, int ke
         return 1;
     }
     if (kept && last != NULL && last->kind == WINSEAM_DROPPED && w->count < RING) {
-        w->ring[(w->head + w->count) % RING] = *last;
+        winseam_event *moved = &w->ring[(w->head + w->count) % RING];
+        *moved = *last;
+        if (moved->at < e->at) moved->at = e->at;   // no earlier than the up now before it
         *last = *e;
         w->count += 1;
         return 1;
     }
-    count_drop(w, 1);
+    count_drop(w, 1, e->at);
     return 0;
 }
 
@@ -227,14 +270,15 @@ static uint32_t pressed_of(const winseam_pad *p) {
     return bits;
 }
 
-static void pad_record(winseam_event *e, int32_t kind, int32_t slot, int32_t button) {
+static void pad_record(winseam_event *e, int32_t kind, int32_t slot, int32_t button, uint64_t at) {
     memset(e, 0, sizeof *e);
     e->kind = kind; e->a = slot; e->b = button;
+    e->at = at;
 }
 
-// An up for each button the pad in `slot` holds, by number; the ring owes each. The pad then reads neutral until its
-// next sample.
-static void release_pad(winseam_window *w, int32_t slot) {
+// An up for each button the pad in `slot` holds, by number, at `at`; the ring owes each. The pad then reads neutral until
+// its next sample.
+static void release_pad(winseam_window *w, int32_t slot, uint64_t at) {
     pad_view *v = &w->pads[slot];
     winseam_event e;
     for (int32_t b = 0; b < WINSEAM_PAD_BUTTONS; b++) {
@@ -242,15 +286,15 @@ static void release_pad(winseam_window *w, int32_t slot) {
         if ((v->held & bit) == 0) continue;
         v->held &= ~bit;
         w->held_count -= 1;
-        pad_record(&e, WINSEAM_PAD_UP, slot, b);
+        pad_record(&e, WINSEAM_PAD_UP, slot, b, at);
         store(w, &e, w->held_count, 1);
     }
     v->stale = 1;
 }
 
-static void release_pads(winseam_window *w) {
+static void release_pads(winseam_window *w, uint64_t at) {
     for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
-        if (w->pads[slot].known) release_pad(w, slot);
+        if (w->pads[slot].known) release_pad(w, slot, at);
     }
 }
 
@@ -259,7 +303,8 @@ static void release_pads(winseam_window *w) {
 // - then each button no longer pressed goes up, then each newly pressed goes down, each by number;
 // - while the window is closed to pads (decision 5) no button is pressed;
 // - a connect or a down counted into a drop was never seen, so the next sample makes it again.
-static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s) {
+// Each event is at `at`, the sample's time.
+static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s, uint64_t at) {
     if (!slot_ok(slot)) return;
     pad_view *v = &w->pads[slot];
     winseam_event e;
@@ -267,19 +312,19 @@ static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s) {
         memset(&v->raw, 0, sizeof v->raw);
         v->stale = 0;
         if (!v->known) return;
-        release_pad(w, slot);
+        release_pad(w, slot, at);
         v->stale = 0;
         v->known = 0;
         v->rumbling = 0;
         w->held_count -= 1;
-        pad_record(&e, WINSEAM_PAD_DISCONNECTED, slot, 0);
+        pad_record(&e, WINSEAM_PAD_DISCONNECTED, slot, 0, at);
         store(w, &e, w->held_count, 1);
         return;
     }
     v->raw = *s;
     v->stale = 0;
     if (!v->known) {
-        pad_record(&e, WINSEAM_PAD_CONNECTED, slot, 0);
+        pad_record(&e, WINSEAM_PAD_CONNECTED, slot, 0, at);
         if (!store(w, &e, w->held_count + 1, 0)) return;
         v->known = 1;
         w->held_count += 1;
@@ -290,20 +335,22 @@ static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s) {
         if ((v->held & bit) == 0 || (want & bit) != 0) continue;
         v->held &= ~bit;
         w->held_count -= 1;
-        pad_record(&e, WINSEAM_PAD_UP, slot, b);
+        pad_record(&e, WINSEAM_PAD_UP, slot, b, at);
         store(w, &e, w->held_count, 1);
     }
     for (int32_t b = 0; b < WINSEAM_PAD_BUTTONS; b++) {
         uint32_t bit = 1u << b;
         if ((v->held & bit) != 0 || (want & bit) == 0) continue;
-        pad_record(&e, WINSEAM_PAD_DOWN, slot, b);
+        pad_record(&e, WINSEAM_PAD_DOWN, slot, b, at);
         if (!store(w, &e, w->held_count + 1, 0)) continue;
         v->held |= bit;
         w->held_count += 1;
     }
 }
 
-void winseam_pad_sample(winseam_window *w, int32_t slot, const winseam_pad *sample) { pad_take(w, slot, sample); }
+void winseam_pad_sample(winseam_window *w, int32_t slot, const winseam_pad *sample, uint64_t at) {
+    pad_take(w, slot, sample, at);
+}
 
 void winseam_pad_read(winseam_window *w, int32_t slot, winseam_pad *into) {
     memset(into, 0, sizeof *into);
@@ -318,7 +365,7 @@ void winseam_pad_read(winseam_window *w, int32_t slot, winseam_pad *into) {
 
 void winseam_set_pads_when_unfocused(winseam_window *w, int32_t on) {
     w->pads_unfocused = on ? 1 : 0;
-    if (!pads_open(w)) { stop_rumbles(w); release_pads(w); }
+    if (!pads_open(w)) { stop_rumbles(w); release_pads(w, call_time(w)); }
 }
 
 // A posted pad event moves the slot's pad as the system would: a down presses its button fully, an up lets it go, a
@@ -336,7 +383,7 @@ static void post_pad(winseam_window *w, const winseam_event *e) {
         s.connected = 1;
         s.buttons[e->b] = pressing ? 1.0f : 0.0f;
     }
-    pad_take(w, e->a, &s);
+    pad_take(w, e->a, &s, e->at);
 }
 
 // The end of every pointer holding a button, in the order they went down: a mouse's buttons go up, by number, and a
@@ -344,8 +391,8 @@ static void post_pad(winseam_window *w, const winseam_event *e) {
 // 2.3). Each is at the pointer's last position. Then, when `pads`, an up for each button a pad holds, by slot and number
 // (WIN-4, decision 6). Then an up for every held key by ascending HID id, so the modifiers (224 to 231) go last: the
 // action goes up before the modifier that chose it. Each up carries the modifiers still held after it. The ring owes
-// each of them, so none is counted into a drop.
-static void release_held(winseam_window *w, int pads) {
+// each of them, so none is counted into a drop. Each is at `at`, its cause's time.
+static void release_held(winseam_window *w, int pads, uint64_t at) {
     winseam_event e;
     while (w->pointer_count > 0) {
         held_pointer *h = &w->pointers[0];
@@ -356,6 +403,7 @@ static void release_held(winseam_window *w, int pads) {
                 w->held_count -= 1;
                 e = h->last;
                 e.kind = WINSEAM_POINTER_UP; e.a = b; e.b = held_mods(w); e.c = 0; e.dx = 0; e.dy = 0;
+                e.at = at;
                 set_buttons(&e, h->held);
                 store(w, &e, w->held_count, 1);
             }
@@ -363,24 +411,29 @@ static void release_held(winseam_window *w, int pads) {
             w->held_count -= bits_in(h->held);
             e = h->last;
             e.kind = WINSEAM_POINTER_CANCEL; e.a = 0; e.b = 0; e.c = 0; e.dx = 0; e.dy = 0;
+            e.at = at;
             set_buttons(&e, 0);
             e.pressure = 0.0f;
             store(w, &e, w->held_count, 1);
         }
         forget_pointer(w, h);
     }
-    if (pads) release_pads(w);
+    if (pads) release_pads(w, at);
     for (int32_t hid = 1; hid < 256; hid++) {
         if (!key_held(w, hid)) continue;
         hold_key(w, hid, 0);
         memset(&e, 0, sizeof e);
         e.kind = WINSEAM_KEY_UP; e.a = hid; e.b = held_mods(w);
         e.x = w->last_x; e.y = w->last_y;
+        e.at = at;
         store(w, &e, w->held_count, 1);
     }
 }
 
-void winseam_release_held(winseam_window *w) { release_held(w, 1); }
+void winseam_release_held(winseam_window *w) { release_held(w, 1, call_time(w)); }
+
+// A cursor's mode, its `PointerLock` at `at`: each backend's, below.
+static void set_cursor(winseam_window *w, int32_t mode, uint64_t at);
 
 // A pointer's event: its buttons held per pointer, as keys are (AGENTS.window.md item 8, decision 2).
 // - An up for a button the pointer does not hold is dropped, and so is a second down for one it does, or for a button
@@ -397,7 +450,7 @@ static void take_pointer(winseam_window *w, const winseam_event *e) {
         int32_t bit = 1 << p.a;
         if (p.kind == WINSEAM_POINTER_DOWN) {
             if ((held & bit) != 0) return;
-            if (h == NULL && w->pointer_count == POINTERS) { count_drop(w, 1); return; }
+            if (h == NULL && w->pointer_count == POINTERS) { count_drop(w, 1, p.at); return; }
             set_buttons(&p, held | bit);
             if (!store(w, &p, w->held_count + 1, 0)) return;   // counted into the drop: not held
             if (h == NULL) {
@@ -465,20 +518,21 @@ static void take(winseam_window *w, const winseam_event *e) {
     if (e->kind == WINSEAM_FOCUS) {
         w->focused = e->a ? 1 : 0;
         if (!w->pads_unfocused && !e->a) stop_rumbles(w);
-        release_held(w, !w->pads_unfocused);
+        release_held(w, !w->pads_unfocused, e->at);
         // Losing the focus while locked gives the pointer back, as a browser does on blur; clicking in locks it again.
-        if (!e->a && w->cursor_mode == 2) winseam_set_cursor(w, 0);
+        if (!e->a && w->cursor_mode == 2) set_cursor(w, 0, e->at);
     }
     store(w, e, w->held_count, 0);
 }
 
 static void push(winseam_window *w, const winseam_event *e) { take(w, e); }
 
-static void push_simple(winseam_window *w, int32_t kind, int32_t a, int32_t b, int32_t c) {
+static void push_simple(winseam_window *w, int32_t kind, int32_t a, int32_t b, int32_t c, uint64_t at) {
     winseam_event e;
     memset(&e, 0, sizeof e);
     e.kind = kind; e.a = a; e.b = b; e.c = c;
     e.x = w->last_x; e.y = w->last_y;
+    e.at = at;
     push(w, &e);
 }
 
@@ -490,6 +544,9 @@ int32_t winseam_next(winseam_window *w, winseam_event *out) {
     return 1;
 }
 
+void winseam_set_cursor(winseam_window *w, int32_t mode) { set_cursor(w, mode, call_time(w)); }
+
+// A record keeps the time it is posted with (WIN-26): a test's, a replay's.
 void winseam_post(winseam_window *w, const winseam_event *e) {
     if (e->kind >= WINSEAM_PAD_CONNECTED && e->kind <= WINSEAM_PAD_UP) { post_pad(w, e); return; }
     if (e->kind == WINSEAM_RESIZE) { w->width = e->a; w->height = e->b; w->fb_width = e->a; w->fb_height = e->b; }
@@ -540,6 +597,7 @@ typedef struct system_pad {
     float rumble[4];       // a test's table: the last rumble asked for, strong, weak, left, right
     int32_t rumble_ms;
     int32_t rumbles;       // a test's table: how many were asked for since the slot was set
+    uint64_t at;           // when the system read it, on kama's clock: on the web its `Gamepad.timestamp`; 0, the pump's
 } system_pad;
 
 static system_pad g_system[WINSEAM_PADS];
@@ -575,10 +633,16 @@ static void system_slot(int32_t slot, const winseam_pad *sample, const char *nam
     p->product = product;
 }
 
-// Every slot's sample to every open system window.
+// Every slot's sample to every open system window, at its time: the system's, or the pump's, now.
 static void deliver_system_pads(void) {
+    uint64_t now = winseam_now();
     for (winseam_window *w = g_open; w != NULL; w = w->next_open) {
-        for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) pad_take(w, slot, &g_system[slot].sample);
+        for (int32_t slot = 0; slot < WINSEAM_PADS; slot++) {
+            uint64_t at = g_system[slot].at != 0 ? g_system[slot].at : now;
+            w->ordering = 1;
+            pad_take(w, slot, &g_system[slot].sample, pump_time(at));
+            w->ordering = 0;
+        }
     }
 }
 
@@ -1004,16 +1068,27 @@ int32_t winseam_glfw_key_to_hid(int32_t k) {
     }
 }
 
+// The time of a callback: the moment it runs, since GLFW gives none (WIN-26). The clock runs forward, so these run in
+// order with each other and with a call's.
+static uint64_t callback_time(winseam_window *w) {
+    (void)w;
+    return winseam_now();
+}
+
 static void on_key(GLFWwindow *g, int key, int scancode, int action, int mods) {
     (void)scancode;
     winseam_window *w = of(g);
     int32_t hid = winseam_glfw_key_to_hid((int32_t)key);
-    if (action == GLFW_PRESS) push_simple(w, WINSEAM_KEY_DOWN, hid, mods_of(mods), 0);
-    else if (action == GLFW_REPEAT) push_simple(w, WINSEAM_KEY_DOWN, hid, mods_of(mods), 1);
-    else if (action == GLFW_RELEASE) push_simple(w, WINSEAM_KEY_UP, hid, mods_of(mods), 0);
+    uint64_t at = callback_time(w);
+    if (action == GLFW_PRESS) push_simple(w, WINSEAM_KEY_DOWN, hid, mods_of(mods), 0, at);
+    else if (action == GLFW_REPEAT) push_simple(w, WINSEAM_KEY_DOWN, hid, mods_of(mods), 1, at);
+    else if (action == GLFW_RELEASE) push_simple(w, WINSEAM_KEY_UP, hid, mods_of(mods), 0, at);
 }
 
-static void on_char(GLFWwindow *g, unsigned int codepoint) { push_simple(of(g), WINSEAM_TEXT, (int32_t)codepoint, 0, 0); }
+static void on_char(GLFWwindow *g, unsigned int codepoint) {
+    winseam_window *w = of(g);
+    push_simple(w, WINSEAM_TEXT, (int32_t)codepoint, 0, 0, callback_time(w));
+}
 
 // GLFW numbers a mouse's buttons left, right, middle; the W3C's `button`, left, middle, right, then back, forward and
 // (5) a pen's eraser. GLFW's sixth to eighth follow at 6.
@@ -1040,6 +1115,7 @@ static void mouse_record(winseam_window *w, winseam_event *e, int32_t kind) {
     e->pointer_kind = WINSEAM_POINTER_MOUSE;
     e->primary = 1;
     e->width = 1.0f; e->height = 1.0f;
+    e->at = callback_time(w);
 }
 
 static void on_mouse_button(GLFWwindow *g, int button, int action, int mods) {
@@ -1082,13 +1158,14 @@ static void on_scroll(GLFWwindow *g, double dx, double dy) {
     e.kind = WINSEAM_SCROLL;
     e.a = 0;   // lines: GLFW's offsets are a wheel's notches
     e.dx = dx; e.dy = dy;
+    e.at = callback_time(w);
     push(w, &e);
 }
 
 static void on_size(GLFWwindow *g, int width, int height) {
     winseam_window *w = of(g);
     w->width = width; w->height = height;
-    push_simple(w, WINSEAM_RESIZE, (int32_t)width, (int32_t)height, 0);
+    push_simple(w, WINSEAM_RESIZE, (int32_t)width, (int32_t)height, 0, callback_time(w));
 }
 
 static void on_framebuffer_size(GLFWwindow *g, int width, int height) {
@@ -1104,17 +1181,22 @@ static void on_scale(GLFWwindow *g, float sx, float sy) {
     memset(&e, 0, sizeof e);
     e.kind = WINSEAM_SCALE_CHANGED;
     e.x = (double)sx;
+    e.at = callback_time(w);
     push(w, &e);
 }
 
 // A focus change releases what is held, and a loss gives back a lock (`take`). GLFW then releases the keys and buttons
 // it holds itself, after this callback and only on a loss (measured on 3.5.1, AGENTS.window.md item 5): the window holds
 // none of them by then, so each of those ups is dropped.
-static void on_focus(GLFWwindow *g, int focused) { push_simple(of(g), WINSEAM_FOCUS, focused ? 1 : 0, 0, 0); }
+static void on_focus(GLFWwindow *g, int focused) {
+    winseam_window *w = of(g);
+    push_simple(w, WINSEAM_FOCUS, focused ? 1 : 0, 0, 0, callback_time(w));
+}
 
 static void on_close(GLFWwindow *g) {
     glfwSetWindowShouldClose(g, GLFW_FALSE);   // the program decides; the request is only an event
-    push_simple(of(g), WINSEAM_CLOSE_REQUESTED, 0, 0, 0);
+    winseam_window *w = of(g);
+    push_simple(w, WINSEAM_CLOSE_REQUESTED, 0, 0, 0, callback_time(w));
 }
 
 winseam_window *winseam_open(const char *title, int32_t width, int32_t height, int32_t focused, const char *canvas,
@@ -1213,7 +1295,7 @@ void winseam_pump(winseam_window *w) {
     deliver_system_pads();
 }
 
-void winseam_set_cursor(winseam_window *w, int32_t mode) {
+static void set_cursor(winseam_window *w, int32_t mode, uint64_t at) {
     int32_t was = w->cursor_mode;
     w->cursor_mode = mode;
     if (w->glfw != NULL) {
@@ -1228,7 +1310,7 @@ void winseam_set_cursor(winseam_window *w, int32_t mode) {
     }
     if ((mode == 2) != (was == 2)) {
         w->have_last = 0;   // the first sample in the new mode only seeds the delta
-        push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0);
+        push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0, at);
     }
 }
 
@@ -1267,7 +1349,8 @@ _Static_assert(offsetof(winseam_event, x) == 16, "js/winseam.js writes winseam_e
 _Static_assert(offsetof(winseam_event, pointer) == 48, "js/winseam.js writes winseam_event's layout");
 _Static_assert(offsetof(winseam_event, pressure) == 64, "js/winseam.js writes winseam_event's layout");
 _Static_assert(offsetof(winseam_event, height) == 84, "js/winseam.js writes winseam_event's layout");
-_Static_assert(sizeof(winseam_event) == 88, "js/winseam.js writes winseam_event's layout");
+_Static_assert(offsetof(winseam_event, at) == 88, "js/winseam.js writes winseam_event's layout");
+_Static_assert(sizeof(winseam_event) == 96, "js/winseam.js writes winseam_event's layout");
 
 // js/winseam.js's own record, never in the ring: the canvas's sizes, which become Resize and ScaleChanged when they
 // change. a: CSS width, b: CSS height (rounded), x: the device pixel ratio, dx and dy: the pixels.
@@ -1280,11 +1363,11 @@ extern void winseam_web_close(int32_t index);
 extern winseam_window *winseam_web_pull(winseam_event *into);
 extern void winseam_web_set_cursor(int32_t index, int32_t mode);
 // The page's pads (WIN-4, decision 1): one read of `navigator.getGamepads()` a pump, then each slot from it. A slot is
-// the pad's browser index. 1 and its parts written (meta: vendor, product, rumble bits, mapped, raw buttons, raw axes),
-// or 0 for an empty index.
+// the pad's browser index. 1 and its parts written (meta: vendor, product, rumble bits, mapped, raw buttons, raw axes;
+// `at_ms` its `Gamepad.timestamp`, 0 where the browser gives none), or 0 for an empty index.
 extern void winseam_web_pads_read(void);
 extern int32_t winseam_web_pad(int32_t slot, winseam_pad *sample, char *name, int32_t name_capacity, int32_t *meta,
-                               uint8_t *raw_buttons, float *raw_axes);
+                               uint8_t *raw_buttons, float *raw_axes, double *at_ms);
 extern int32_t winseam_web_rumble(int32_t slot, float a, float b, int32_t milliseconds, int32_t triggers);
 
 // js/winseam.js writes a pad's sample in this layout, at these offsets.
@@ -1303,11 +1386,12 @@ static void read_system_pads(void) {
         int32_t meta[6] = { 0, 0, 0, 0, 0, 0 };
         uint8_t raw_buttons[WINSEAM_PAD_RAW_BUTTONS];
         float raw_axes[WINSEAM_PAD_RAW_AXES];
+        double at_ms = 0.0;
         memset(&s, 0, sizeof s);
         memset(name, 0, sizeof name);
         memset(raw_buttons, 0, sizeof raw_buttons);
         memset(raw_axes, 0, sizeof raw_axes);
-        if (!winseam_web_pad(slot, &s, name, (int32_t)sizeof name, meta, raw_buttons, raw_axes)) {
+        if (!winseam_web_pad(slot, &s, name, (int32_t)sizeof name, meta, raw_buttons, raw_axes, &at_ms)) {
             memset(p, 0, sizeof *p);
             continue;
         }
@@ -1325,6 +1409,7 @@ static void read_system_pads(void) {
         p->raw_counts[2] = 0;   // the Gamepad API has no hats
         memcpy(p->raw_buttons, raw_buttons, sizeof raw_buttons);
         memcpy(p->raw_axes, raw_axes, sizeof raw_axes);
+        p->at = at_ms > 0.0 ? (uint64_t)(at_ms * 1e6) : 0;   // kama's clock on the web: performance.now() in ns
     }
 }
 
@@ -1385,9 +1470,10 @@ static void system_destroy(winseam_window *w) {
     w->selector = NULL;
 }
 
-// A record from js/winseam.js: the sizes become the events of what changed; the queue's own drop is counted into the
-// ring's; the browser giving the lock back sets the mode to Normal (decision 7); the rest is what any system sends.
-static void web_take(winseam_window *w, const winseam_event *e) {
+// A record from js/winseam.js, its time already held to the pumps (`web_take`): the sizes become the events of what
+// changed; the queue's own drop is counted into the ring's; the browser giving the lock back sets the mode to Normal
+// (decision 7); the rest is what any system sends.
+static void web_take_timed(winseam_window *w, const winseam_event *e) {
     if (e->kind == WEB_SIZES) {
         float scale = (float)e->x;
         w->fb_width = (int32_t)e->dx;
@@ -1398,23 +1484,37 @@ static void web_take(winseam_window *w, const winseam_event *e) {
             memset(&s, 0, sizeof s);
             s.kind = WINSEAM_SCALE_CHANGED;
             s.x = (double)scale;
+            s.at = e->at;
             push(w, &s);
         }
         if (e->a != w->width || e->b != w->height) {
             w->width = e->a;
             w->height = e->b;
-            push_simple(w, WINSEAM_RESIZE, e->a, e->b, 0);
+            push_simple(w, WINSEAM_RESIZE, e->a, e->b, 0, e->at);
         }
         return;
     }
-    if (e->kind == WINSEAM_DROPPED) { count_drop(w, e->a); return; }
+    if (e->kind == WINSEAM_DROPPED) { count_drop(w, e->a, e->at); return; }
     if (e->kind == WINSEAM_POINTER_LOCK && !e->a) w->cursor_mode = 0;
     take(w, e);
 }
 
-// Every canvas window's queue, as `glfwPollEvents` takes every GLFW window's.
+// A record from js/winseam.js, at the browser's time held to the pumps, each the system's, no earlier than the one
+// before it (WIN-26).
+static void web_take(winseam_window *w, const winseam_event *record) {
+    winseam_event timed = *record;
+    timed.at = pump_time(record->at);
+    w->ordering = 1;
+    web_take_timed(w, &timed);
+    w->ordering = 0;
+}
+
+// Every canvas window's queue, as `glfwPollEvents` takes every GLFW window's. Its start is the pump's time, which the
+// browser's times are held to (WIN-26): every record queued happened before it, since a listener runs between tasks.
 void winseam_pump(winseam_window *w) {
     if (w->selector == NULL) return;
+    g_pump_before = g_pump_at;
+    g_pump_at = winseam_now();
     winseam_event e;
     winseam_window *target;
     while ((target = winseam_web_pull(&e)) != NULL) web_take(target, &e);
@@ -1423,15 +1523,15 @@ void winseam_pump(winseam_window *w) {
 }
 
 // On a canvas, the browser says when a lock takes and when it goes (decision 7): a lock is asked for at the next
-// pointer down, and PointerLock comes from the browser. Headless, at once.
-void winseam_set_cursor(winseam_window *w, int32_t mode) {
+// pointer down, and PointerLock comes from the browser. Headless, at once, at `at`.
+static void set_cursor(winseam_window *w, int32_t mode, uint64_t at) {
     int32_t was = w->cursor_mode;
     w->cursor_mode = mode;
     if (w->selector != NULL) {
         winseam_web_set_cursor(w->canvas, mode);
         return;
     }
-    if ((mode == 2) != (was == 2)) push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0);
+    if ((mode == 2) != (was == 2)) push_simple(w, WINSEAM_POINTER_LOCK, mode == 2 ? 1 : 0, 0, 0, at);
 }
 
 // The browser maps the page's pads.

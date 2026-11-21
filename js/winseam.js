@@ -12,6 +12,10 @@
 // sizes keep the last, and past CAP records an event is counted into a `Dropped` record where it happened, except an up,
 // a cancel, a focus change, a pointer lock and the sizes, which go on to HARD so a key is never left held.
 //
+// Each record carries its time (WIN-26), `at`, in milliseconds on `performance.now()`'s timeline, which kama's clock
+// reads on the web: the DOM event's `timeStamp`, and for the sizes, which no event carries, the observer's moment. A
+// coalesced record takes the newest's time, and a `Dropped` the first it counts. The C side holds each to the pumps.
+//
 // A release build runs Closure over this file (kama 0.9.966, KR-289), which renames every name it cannot prove the
 // browser's. A name the browser or the page reads is quoted, so it keeps its name. These are the file's own, which
 // nothing outside the program reads, and the gate (tools/closure-names.mjs) holds every other name to its release build:
@@ -20,7 +24,7 @@
 // closure-own: buttonBits mods typed
 // closure-own: pointerKind close put pull write pointer pointerMove pointerDown pointerButton requestLock lockChanged
 // closure-own: setCursor follows measure sizes watchScale observed pads record last lockWanted insets sized fw fh
-// closure-own: observer saved sizedByPage primary fn
+// closure-own: observer saved sizedByPage primary fn at
 
 mergeInto(LibraryManager.library, {
   $WinSeam__deps: ['$UTF8ToString'],
@@ -129,8 +133,8 @@ mergeInto(LibraryManager.library, {
       };
       on(canvas, 'keydown', function (e) { S.key(win, e, true); });
       on(canvas, 'keyup', function (e) { S.key(win, e, false); });
-      on(canvas, 'focus', function () { S.put(win, { kind: S.FOCUS, a: 1 }); });
-      on(canvas, 'blur', function () { S.put(win, { kind: S.FOCUS, a: 0 }); });
+      on(canvas, 'focus', function (e) { S.put(win, { kind: S.FOCUS, a: 1, at: e.timeStamp }); });
+      on(canvas, 'blur', function (e) { S.put(win, { kind: S.FOCUS, a: 0, at: e.timeStamp }); });
       on(canvas, 'pointerdown', function (e) { S.pointerDown(win, e); });
       on(canvas, 'pointermove', function (e) { S.pointerMove(win, e); });
       on(canvas, 'pointerup', function (e) { S.pointerButton(win, e, S.POINTER_UP, e.button); });
@@ -142,7 +146,7 @@ mergeInto(LibraryManager.library, {
       });
       on(canvas, 'wheel', function (e) { S.wheel(win, e); }, { passive: false });
       on(canvas, 'contextmenu', function (e) { e.preventDefault(); });
-      on(document, 'pointerlockchange', function () { S.lockChanged(win); });
+      on(document, 'pointerlockchange', function (e) { S.lockChanged(win, e); });
 
       if (typeof ResizeObserver !== 'undefined') {
         win.observer = new ResizeObserver(function (entries) { S.observed(win, entries[entries.length - 1]); });
@@ -187,14 +191,14 @@ mergeInto(LibraryManager.library, {
           r.dx = dx; r.dy = dy;
           return;
         }
-        if (r.kind === S.SCROLL && last.a === r.a) { last.dx += r.dx; last.dy += r.dy; return; }
+        if (r.kind === S.SCROLL && last.a === r.a) { last.dx += r.dx; last.dy += r.dy; last.at = r.at; return; }
         if (r.kind === S.SIZES) { q[q.length - 1] = r; return; }
       }
       var owed = r.kind === S.KEY_UP || r.kind === S.POINTER_UP || r.kind === S.POINTER_CANCEL || r.kind === S.FOCUS ||
                  r.kind === S.POINTER_LOCK || r.kind === S.SIZES;
       if (n < S.CAP || (owed && n < S.HARD)) { q.push(r); return; }
       if (last && last.kind === S.DROPPED) { last.a += 1; return; }
-      q.push({ kind: S.DROPPED, a: 1 });
+      q.push({ kind: S.DROPPED, a: 1, at: r.at });
     },
 
     // The next record of any window into `into`, oldest first, window by window; its C record, or 0 when none is left.
@@ -212,8 +216,11 @@ mergeInto(LibraryManager.library, {
       return 0;
     },
 
-    // `winseam_event`'s layout: four int32, four float64, four int32, six float32 (88 bytes; winseam.c asserts it).
+    // `winseam_event`'s layout: four int32, four float64, four int32, six float32, and the time, a uint64 of nanoseconds,
+    // written as its two 32-bit halves (96 bytes; winseam.c asserts it). Nanoseconds as kama's clock reads them on the
+    // web, `performance.now()` × 1e6 cut to a whole number, so a record and the clock agree.
     write: function (p, r) {
+      var ns = Math.floor((r.at || 0) * 1e6);
       HEAP32[p >> 2] = r.kind;
       HEAP32[(p >> 2) + 1] = r.a | 0;
       HEAP32[(p >> 2) + 2] = r.b | 0;
@@ -232,6 +239,8 @@ mergeInto(LibraryManager.library, {
       HEAPF32[(p + 76) >> 2] = r.twist || 0;
       HEAPF32[(p + 80) >> 2] = r.width || 0;
       HEAPF32[(p + 84) >> 2] = r.height || 0;
+      HEAP32[(p + 88) >> 2] = ns % 4294967296;
+      HEAP32[(p + 92) >> 2] = Math.floor(ns / 4294967296);
     },
 
     // ---- keys -----------------------------------------------------------------------------------------------------
@@ -241,10 +250,10 @@ mergeInto(LibraryManager.library, {
     key: function (win, e, down) {
       var S = WinSeam, hid = S.hidOf(e.code);
       if (hid !== 0) e.preventDefault();
-      S.put(win, { kind: down ? S.KEY_DOWN : S.KEY_UP, a: hid, b: S.mods(e), c: down && e.repeat ? 1 : 0 });
+      S.put(win, { kind: down ? S.KEY_DOWN : S.KEY_UP, a: hid, b: S.mods(e), c: down && e.repeat ? 1 : 0, at: e.timeStamp });
       if (!down) return;
       var cp = S.typed(e);
-      if (cp !== 0) S.put(win, { kind: S.TEXT, a: cp });
+      if (cp !== 0) S.put(win, { kind: S.TEXT, a: cp, at: e.timeStamp });
     },
 
     // ---- pointers -------------------------------------------------------------------------------------------------
@@ -257,7 +266,7 @@ mergeInto(LibraryManager.library, {
       var r = {
         kind: kind, b: S.mods(e), x: x, y: y, dx: 0, dy: 0, pointer: e.pointerId,
         pointerKind: S.pointerKind(e.pointerType), primary: e.isPrimary ? 1 : 0, pressure: e.pressure,
-        tiltX: e.tiltX, tiltY: e.tiltY, twist: e.twist, width: e.width, height: e.height,
+        tiltX: e.tiltX, tiltY: e.tiltY, twist: e.twist, width: e.width, height: e.height, at: e.timeStamp,
       };
       win.last.set(e.pointerId, { x: x, y: y });
       return r;
@@ -309,7 +318,7 @@ mergeInto(LibraryManager.library, {
       var S = WinSeam;
       e.preventDefault();
       var unit = e.deltaMode === 1 ? 0 : 1, k = e.deltaMode === 2 ? (win.sized.h || 1) : 1;
-      S.put(win, { kind: S.SCROLL, a: unit, dx: -e.deltaX * k, dy: -e.deltaY * k });
+      S.put(win, { kind: S.SCROLL, a: unit, dx: -e.deltaX * k, dy: -e.deltaY * k, at: e.timeStamp });
     },
 
     // ---- pointer lock (decision 7) --------------------------------------------------------------------------------
@@ -328,12 +337,12 @@ mergeInto(LibraryManager.library, {
       }
     },
 
-    lockChanged: function (win) {
+    lockChanged: function (win, e) {
       var S = WinSeam, now = document.pointerLockElement === win.canvas;
       if (now === win.locked) return;
       win.locked = now;
       if (!now) win.lockWanted = false;   // the browser gave it back: the mode falls back to Normal
-      S.put(win, { kind: S.POINTER_LOCK, a: now ? 1 : 0 });
+      S.put(win, { kind: S.POINTER_LOCK, a: now ? 1 : 0, at: e.timeStamp });
     },
 
     setCursor: function (win, mode) {
@@ -392,7 +401,7 @@ mergeInto(LibraryManager.library, {
       var lw = Math.round(w), lh = Math.round(h);
       if (s.w === lw && s.h === lh && s.fw === fw && s.fh === fh && s.scale === scale) return;
       win.sized = { w: lw, h: lh, fw: fw, fh: fh, scale: scale };
-      if (report) WinSeam.put(win, { kind: WinSeam.SIZES, a: lw, b: lh, x: scale, dx: fw, dy: fh });
+      if (report) WinSeam.put(win, { kind: WinSeam.SIZES, a: lw, b: lh, x: scale, dx: fw, dy: fh, at: performance.now() });
     },
 
     // A change of the device pixel ratio (another display, the page's zoom): a `matchMedia` query on the ratio now,
@@ -452,13 +461,14 @@ mergeInto(LibraryManager.library, {
   // the pad's browser index, the lowest free, reused. A standard-mapped pad fills the standard view, its values as the
   // browser gives them, untouched; every pad fills the raw view, its buttons and axes in the browser's order. Its vendor
   // and product are read from its id, as Chromium ("Vendor: 054c Product: 09cc") or Firefox ("054c-09cc-") writes them;
-  // 0 where neither does.
+  // 0 where neither does. Its time (WIN-26) is its `timestamp`, the browser's last update of it, in milliseconds on
+  // `performance.now()`'s timeline; 0 where it gives none.
   winseam_web_pads_read__deps: ['$WinSeam'],
   winseam_web_pads_read: function () {
     WinSeam.pads = (typeof navigator !== 'undefined' && navigator.getGamepads) ? navigator.getGamepads() : [];
   },
   winseam_web_pad__deps: ['$WinSeam', '$stringToUTF8'],
-  winseam_web_pad: function (slot, sample, name, nameCapacity, meta, rawButtons, rawAxes) {
+  winseam_web_pad: function (slot, sample, name, nameCapacity, meta, rawButtons, rawAxes, atMs) {
     var pads = WinSeam.pads || [];
     var p = slot < pads.length ? pads[slot] : null;
     if (!p || !p.connected) return 0;
@@ -487,6 +497,7 @@ mergeInto(LibraryManager.library, {
     HEAP32[(meta >> 2) + 5] = na;
     for (b = 0; b < nb; b++) HEAPU8[rawButtons + b] = p.buttons[b].pressed ? 1 : 0;
     for (a = 0; a < na; a++) HEAPF32[(rawAxes >> 2) + a] = p.axes[a];
+    HEAPF64[atMs >> 3] = typeof p.timestamp === 'number' ? p.timestamp : 0;
     return 1;
   },
   // A rumble on the page's pad at `slot`: its actuator's dual-rumble or trigger-rumble effect, or its reset to stop.

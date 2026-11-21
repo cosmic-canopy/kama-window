@@ -8,6 +8,7 @@ file @compileFor(ARCH_WASM32);
 import {
     Tally, drained, expectDrained,
     window::Window, window::Event, window::Gamepad, window::PadButton, window::PadAxis, window::PadInfo, window::PadRaw,
+    std::time::monotonicNow,
 };
 export { webPadCases };
 
@@ -122,7 +123,7 @@ unsafe fn void webPadCases(ref Tally t, ref Window w) {
     check(t: t, name: "on the web, the browser maps: added mappings take nothing",
           ok: Window::addPadMappings(text: "03000000ffff0000eeee000000000000,a pad,a:b0,") == 0, why: "it took one");
 
-    w.post(event: Event::Focus(focused: false));
+    w.post(event: Event::Focus(focused: false), at: monotonicNow());
     w.setPadsWhenUnfocused(on: false);
     expectDrained(t: t, w: w, name: "on the web too, pads that close at a focus loss release what they hold",
                   want: "Focus false; PadButtonUp 1 0; PadButtonUp 1 7");

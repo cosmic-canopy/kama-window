@@ -6,6 +6,8 @@
 // - `pump()` is explicit; `pollEvent()` takes one event at a time, in the order they happened, so a resize and a click
 //   stay in order. The queue is a fixed ring that coalesces moves, scrolls and resizes, and reports `Dropped(n)` rather
 //   than dropping in silence.
+// - Each event comes out with the time it happened (WIN-26), a `TimedEvent`, on kama's monotonic clock: `std::time`'s
+//   `Instant`, the best its backend has, so a program can tell which of its simulation steps an input belongs to.
 // - A `Key` is a physical key, named as the DOM's `KeyboardEvent.code` names it and numbered by its USB HID usage id,
 //   whatever the layout; typed text arrives separately, as `Text`.
 // - The window keeps what is held (WIN-2, AGENTS.window.md item 5): every up follows its down, every down is followed in
@@ -19,6 +21,7 @@
 import {
     std::collections::DynamicArray,
     std::encoding::utf8::decode, std::encoding::utf8::Utf8Error,
+    std::time::Instant,
     window::native::winseam_event,
     window::native::KIND_KEY_DOWN, window::native::KIND_KEY_UP, window::native::KIND_TEXT,
     window::native::KIND_POINTER_MOVE, window::native::KIND_POINTER_DOWN, window::native::KIND_POINTER_UP,
@@ -39,8 +42,8 @@ import {
 };
 
 export {
-    Window, WindowOptions, WindowError, Event, Key, Pointer, PointerKind, PointerButton, ScrollUnit, Mods, CursorMode,
-    Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis, PadInfo, PadRaw,
+    Window, WindowOptions, WindowError, Event, TimedEvent, Key, Pointer, PointerKind, PointerButton, ScrollUnit, Mods,
+    CursorMode, Size, NativeKind, NativeWindow, Gamepad, PadButton, PadAxis, PadInfo, PadRaw,
 };
 
 type enum WindowError implements Error {
@@ -296,6 +299,23 @@ type enum Event {
     PadButtonDown(int32 slot, PadButton button),
     PadButtonUp(int32 slot, PadButton button),
     Dropped(int32 count)                                       // the queue was full: this many events were lost
+}
+
+// An event and when it happened (WIN-26): `at` on kama's monotonic clock, `std::time`'s `Instant`, so it compares with
+// `monotonicNow()` and with a frame's time. The best each backend has:
+// - natively, the moment the system's callback ran inside `pump()` (GLFW gives no time of its own), and for a pad, the
+//   moment the pump read it;
+// - on the web, the browser's own: a DOM event's `timeStamp`, a pad's `Gamepad.timestamp`, each held between the pump
+//   before and the pump that took it;
+// - what the window makes takes its cause's time: the releases a `Focus` makes, the `Focus`'s; `releaseHeld()`'s and a
+//   headless `setCursor`'s, the call's;
+// - a posted event, the time it is posted with (`post(event:, at:)`, `postPad(slot:, pad:, at:)`), which a replay keeps.
+// The system's times never run backwards in the order the events come out. A coalesced move or scroll has the newest
+// sample's time, a resize its last's, and a `Dropped` the time of the first event it counts.
+@generate(of)
+type value TimedEvent {
+    public Event event;
+    public Instant at;
 }
 
 // Whose handles a `NativeWindow` holds.
@@ -577,19 +597,21 @@ type resource Window {
     // Take the system's pending events into the queue (every open window's, natively). Headless, nothing.
     public unsafe fn void pump() { if (this.seam != null) { pumpWindow(window: this.seam); } }
 
-    // The next event, oldest first; None when the queue is empty.
-    public unsafe fn Optional<Event> pollEvent() {
+    // The next event and its time (`TimedEvent`), oldest first; None when the queue is empty.
+    public unsafe fn Optional<TimedEvent> pollEvent() {
         if (this.seam == null) { return Optional::None; }
         winseam_event e = winseam_event.zero();
         if (nextEvent(window: this.seam, into: cast<UnsafePtr>(addr(of: e))) == 0) { return Optional::None; }
-        return Optional::Some(value: eventOf(e: e));
+        return Optional::Some(value: TimedEvent.of(event: eventOf(e: e), at: Instant.of(rawNanos: e.at)));
     }
 
-    // An event into the queue as if the system had sent it: coalesced like one, and moving what is held like one, so a
-    // posted Focus releases what is held first. A Resize also sets the size.
-    public unsafe fn void post(const ref Event event) {
+    // An event into the queue as if the system had sent it at `at`: coalesced like one, and moving what is held like one,
+    // so a posted Focus releases what is held first, at its time. A Resize also sets the size. The event keeps `at` as
+    // given, so a test or a replay places it where it wants.
+    public unsafe fn void post(const ref Event event, Instant at) {
         if (this.seam == null) { return; }
         winseam_event e = recordOf(event: event);
+        e.at = at.rawNanos;
         postEvent(window: this.seam, event: cast<UnsafeConstPtr>(addr(of: e)));
     }
 
@@ -618,15 +640,15 @@ type resource Window {
         return g;
     }
 
-    // A pad's sample into `slot` as if the system had read it (a test, a replay): compared with what the window has
-    // queued, it makes the slot's connect, disconnect, downs and ups. A slot outside 0 to 15 is ignored.
-    public unsafe fn void postPad(int32 slot, const ref Gamepad pad) {
+    // A pad's sample into `slot` as if the system had read it at `at` (a test, a replay): compared with what the window
+    // has queued, it makes the slot's connect, disconnect, downs and ups, each at `at`. A slot outside 0 to 15 is ignored.
+    public unsafe fn void postPad(int32 slot, const ref Gamepad pad, Instant at) {
         if (this.seam == null) { return; }
         winseam_pad sample = winseam_pad.zero();
         sample.connected = pad.connected ? 1 : 0;
         sample.buttons = pad.buttons;
         sample.axes = pad.axes;
-        padSample(window: this.seam, slot: slot, sample: sample);
+        padSample(window: this.seam, slot: slot, sample: sample, at: at.rawNanos);
     }
 
     // What the system says of the pad in `slot`, while the window knows a pad there (from its `PadConnected` to its

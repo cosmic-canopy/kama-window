@@ -10,6 +10,7 @@ import {
     window::Window, window::WindowError, window::WindowOptions, window::Gamepad, window::PadButton, window::PadAxis,
     window::PadInfo, window::NativeWindow, window::PadRaw,
     std::collections::DynamicArray, std::encoding::utf8::decode, std::encoding::utf8::Utf8Error,
+    std::time::monotonicNow,
 };
 export { systemPadCases, noSystemPads };
 
@@ -116,7 +117,7 @@ unsafe fn void replacedRead(ref Tally t) {
                     string headlessInfo = infoText(w: h, slot: 0);
                     check(t: t, name: "a headless window has no pad info", ok: headlessInfo == "none",
                           why: "it is `${headlessInfo}`");
-                    h.postPad(slot: 0, pad: Gamepad.neutral());
+                    h.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
                     string postedInfo = infoText(w: h, slot: 0);
                     check(t: t, name: "a headless window's posted pad has no system info, though the system has a pad there",
                           ok: postedInfo == "none", why: "it is `${postedInfo}`");
@@ -198,7 +199,7 @@ unsafe fn void rumbleCases(ref Tally t) {
             w.pump();
             string ignored = drained(w: w);
             Window h = Window.headless(width: 64, height: 64);
-            h.postPad(slot: 0, pad: Gamepad.neutral());
+            h.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
             check(t: t, name: "a headless window rumbles nothing, though the system has a pad with motors in the slot",
                   ok: !h.rumble(slot: 0, strong: 1.0, weak: 1.0, milliseconds: 100) && rumbledText(slot: 0) == "",
                   why: "it took one");

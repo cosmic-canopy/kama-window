@@ -162,6 +162,13 @@ mergeInto(LibraryManager.library, {
     };
   },
 
+  // WIN-26: the tests' pad at `slot` as last updated at `ms`, on `performance.now()`'s timeline: its `timestamp`, which
+  // the package reads as its events' time.
+  windowtests_web_pad_at: function (slot, ms) {
+    var p = globalThis.windowtestsPads && globalThis.windowtestsPads[slot];
+    if (p) p['timestamp'] = ms;
+  },
+
   // How many effects the tests' pad at `slot` was asked to play, the last ones' motors (strong, weak, left, right) and
   // length, -1 after a reset; 0 when none.
   windowtests_web_rumbled: function (slot, motors, ms) {

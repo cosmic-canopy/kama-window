@@ -13,9 +13,10 @@ file @compileFor(ARCH_WASM32);
 import {
     core::println, core::env::args, core::env::Args,
     std::app::App, std::app::Lifecycle, std::app::run, std::app::Pace, std::app::quit,
-    Tally, describe, quietly, drained, expectDrained, summary, webPadCases,
+    Tally, describe, quietly, drained, expectDrained, summary, webPadCases, webTimeCases,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Pointer, window::CursorMode,
     window::Size, window::NativeWindow, window::NativeKind,
+    window::TimedEvent,
 };
 export { webWindow, webFinish };
 
@@ -174,9 +175,9 @@ unsafe fn void expectPumped(ref Tally t, ref Window w, const ref string name, co
 
 // The next event's pointer, after a pump, when it is a pointer event.
 unsafe fn Optional<Pointer> nextPointer(ref Window w) {
-    Optional<Event> e = w.pollEvent();
+    Optional<TimedEvent> e = w.pollEvent();
     return match (e) {
-        case Some(value: v): match (v) {
+        case Some(value: v): match (v.event) {
             case PointerMove(pointer: p, dx: dx, dy: dy): Optional::Some(value: p);
             case PointerDown(pointer: p, button: b, mods: m): Optional::Some(value: p);
             case PointerUp(pointer: p, button: b, mods: m): Optional::Some(value: p);
@@ -359,8 +360,8 @@ unsafe fn void pointers(ref Tally t, ref Window w) {
     check(t: t, name: "a pointer down focuses the canvas", ok: active(sel: "#canvas"), why: "it does not");
     w.pump();
     string first = "";
-    Optional<Event> e = w.pollEvent();
-    match (e) { case Some(value: v): { first = describe(e: v); } case None: { } };
+    Optional<TimedEvent> e = w.pollEvent();
+    match (e) { case Some(value: v): { first = describe(e: v.event); } case None: { } };
     check(t: t, name: "the focus comes first, as a native window's activation does", ok: first == "Focus true",
           why: "got `${first}`");
     Optional<Pointer> p = nextPointer(w: w);
@@ -655,6 +656,7 @@ unsafe fn void webWindow(ref Tally t) {
     pointers(t: t, w: w);
     cursor(t: t, w: w);
     webPadCases(t: t, w: w);
+    webTimeCases(t: t, w: w);
     closing(t: t, w: give w);
     canvases(t: t);
     pageSized(t: t);
@@ -817,11 +819,11 @@ type resource WebRun implements App {
         }
         if (s == 11) {
             this.window.pump();
-            Optional<Event> e = this.window.pollEvent();
+            Optional<TimedEvent> e = this.window.pollEvent();
             string why = "no event";
             match (e) {
                 case Some(value: v): {
-                    match (v) {
+                    match (v.event) {
                         case PointerMove(pointer: q, dx: dx, dy: dy): {
                             println(s: "measured: locked, a move of 30 CSS pixels is dx ${dx}, at ${q.x} ${q.y}");
                             // A trusted position at a scale of 1.5 comes back within a millionth of a pixel.
@@ -829,7 +831,7 @@ type resource WebRun implements App {
                             if (dx > 0.0 && still) { why = ""; }
                             else { why = "dx ${dx} at ${q.x} ${q.y}"; }
                         }
-                        case _: { why = describe(e: v); }
+                        case _: { why = describe(e: v.event); }
                     };
                 }
                 case None: { }

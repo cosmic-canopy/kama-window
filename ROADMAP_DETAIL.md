@@ -8,40 +8,6 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
-<a id="event-times"></a>
-## WIN-26: each event's time
-
-kyoten splits a frame's input across the simulation steps it owes by each event's time (its frame-phases § Decided,
-2026-11-04), and its owner chose that this package give that time (kyoten's `docs/design/input.md`, question 1,
-2026-11-21): each event comes out with the time it happened on kama's monotonic clock, `std::time`'s `Instant`, the
-best its backend has.
-- **The web:** a DOM event's `timeStamp`, on `performance.now()`'s timeline, which is the clock kama's `Instant` reads
-  there (kama's `include/kama_time.h`); a pad's sample, its `Gamepad.timestamp`.
-- **Natively:** GLFW gives no time and calls back inside `glfwPollEvents`, so a key's or a pointer's time is the pump's
-  until a backend gives more (WIN-19's high-rate input). SDL stamps a GameInput pad's button with its reading's time
-  (`third_party/sdl/src/joystick/gdk/SDL_gameinputjoystick.cpp:592`), though it reads only the current reading
-  (`:939`), and an XInput pad with the poll's (`SDL_xinputjoystick.c:336`).
-- **A posted event** takes the time it is posted with, so a replay keeps its own.
-
-**The row's question, the shape: decided (A)** (the owner, 2026-11-21, "A sounds good to me so far", asked at kyoten's
-forty-fourth session's readying; "so far": a change the build finds is asked). The callers that change: this package's tests (14 `pollEvent`s, 74 `post`s), `@kama/gpu`'s 2, `@kama/graphics`' 2 and kyoten's 1.
-- **(A)** `pollEvent()` hands back the event with its time, `Optional<TimedEvent>`, a plain value of `event` and `at`
-  (an `Instant`), and `post(event:, at:)` takes one, a test's or a replay's own. Every caller changes once, reading
-  `t.event` where it read the event. SDL keeps the time in every event's header, and Unity's events carry theirs.
-- **(B)** The time inside every event: each case gains an `at`, which every `match` arm and every `post` names.
-- **(C)** `lastEventTime()`, the time of the event the last `pollEvent()` took, nothing else changing: easy to read
-  after the wrong poll, and a replay posting its times needs a second call too.
-
-**`postPad` takes a time too: decided (A)** (the owner, 2026-11-21, "A (Recommended)", asked at kyoten's forty-fifth
-session's start, found reading the code for the row): `postPad(slot:, pad:, at:)`. Every event a posted reading makes
-(the slot's connect, disconnect, downs and ups) carries `at`, as `post(event:, at:)` does, so a test or a replay places
-a pad press at its own time. The package's 42 `postPad` calls change once. Set aside: (B) `postPad` stamping the clock at
-the call, which leaves a test placing a press in a step only by waiting, and a replay's presses at the replay's moment.
-
-Settled with it, to report: a coalesced move or scroll takes its newest sample's time, a size its last's, and a
-`Dropped` the time of the first event it counts. Done: on every backend an event's time is no later than the pump that delivered it and no earlier than the one before,
-in the order the events come out; on the web, two events a known delay apart keep it.
-
 <a id="retire-driver"></a>
 ## WIN-24: the driver retired
 

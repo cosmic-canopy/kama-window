@@ -5,6 +5,15 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Each event's time** (WIN-26, 2026-11-21, kama 0.9.978), for kyoten's input, which splits a frame's input across the
+  simulation steps it owes by each event's time (its `docs/design/input.md`, 2026-11-21). **Breaking:**
+  `pollEvent()` hands back `Optional<TimedEvent>`, a plain value of `event` and `at` (an `Instant` on kama's monotonic
+  clock), so a caller reads `t.event` where it read the event; `post(event:, at:)` and `postPad(slot:, pad:, at:)` take
+  the time they post at, which the events keep. The time is the best each backend has: natively the moment GLFW's
+  callback ran and the moment the pump read a pad; on the web the DOM event's `timeStamp` and a pad's
+  `Gamepad.timestamp`, held to the pumps. The C seam reads kama's clock through the package's own `expose fn`, and a
+  record carries its time (96 bytes, where it was 88). `tests/` gains `times.kama`: 46 cases natively, 32 under node, 49
+  in each browser.
 - **A key's and a button's name** (WIN-25, 2026-11-21, kama 0.9.978): `Key`, `PadButton`, `PadAxis` and
   `PointerButton` are read and written by their case's name (`@generate(Serializable, Deserializable)`), so a
   bindings record names `"ArrowUp"` or `"RightShoulder"` as this package does, with no second table of names, and a

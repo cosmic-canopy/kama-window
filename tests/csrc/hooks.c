@@ -37,6 +37,22 @@ int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height) {
     SetWindowPos((HWND)hwnd, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
     return 1;
 }
+int32_t windowtests_send_char(void *hwnd, int32_t codepoint) {
+    SendMessageW((HWND)hwnd, WM_CHAR, (WPARAM)codepoint, 1);
+    return 1;
+}
+int32_t windowtests_send_mouse_move(void *hwnd, int32_t x, int32_t y) {
+    SendMessageW((HWND)hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+    return 1;
+}
+int32_t windowtests_send_wheel(void *hwnd, int32_t delta) {
+    SendMessageW((HWND)hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, (WORD)(SHORT)delta), 0);
+    return 1;
+}
+int32_t windowtests_send_close(void *hwnd) {
+    SendMessageW((HWND)hwnd, WM_CLOSE, 0, 0);
+    return 1;
+}
 
 // SDL's virtual pads, each held open here so its state can be set.
 #include <SDL3/SDL.h>
@@ -174,6 +190,10 @@ void windowtests_shown_next(int32_t shown) { (void)shown; }
 int32_t windowtests_send_key(void *hwnd, int32_t vk, int32_t up) { (void)hwnd; (void)vk; (void)up; return -1; }
 int32_t windowtests_send_focus(void *hwnd, int32_t focused) { (void)hwnd; (void)focused; return -1; }
 int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height) { (void)hwnd; (void)width; (void)height; return -1; }
+int32_t windowtests_send_char(void *hwnd, int32_t codepoint) { (void)hwnd; (void)codepoint; return -1; }
+int32_t windowtests_send_mouse_move(void *hwnd, int32_t x, int32_t y) { (void)hwnd; (void)x; (void)y; return -1; }
+int32_t windowtests_send_wheel(void *hwnd, int32_t delta) { (void)hwnd; (void)delta; return -1; }
+int32_t windowtests_send_close(void *hwnd) { (void)hwnd; return -1; }
 uint32_t windowtests_virtual_pad(const char *name, int32_t trigger_motors) { (void)name; (void)trigger_motors; return 0; }
 int32_t windowtests_virtual_button(uint32_t id, int32_t button, int32_t down) { (void)id; (void)button; (void)down; return 0; }
 int32_t windowtests_virtual_axis(uint32_t id, int32_t axis, int32_t value) { (void)id; (void)axis; (void)value; return 0; }

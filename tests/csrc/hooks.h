@@ -29,6 +29,12 @@ int32_t windowtests_send_focus(void *hwnd, int32_t focused);
 // Sets `hwnd`'s outer size to `width` × `height` without moving, raising or activating it: GLFW's window procedure takes
 // the WM_SIZE, and its framebuffer callback runs at the next pump. 1 when set; -1 off Windows.
 int32_t windowtests_resize(void *hwnd, int32_t width, int32_t height);
+// WIN-26: more of the system's messages, each sent so GLFW's callback runs before the send returns: a typed character,
+// the mouse moved to `x`, `y` in the client area, a wheel's notches (`delta` in WHEEL_DELTA units), and a close request.
+int32_t windowtests_send_char(void *hwnd, int32_t codepoint);
+int32_t windowtests_send_mouse_move(void *hwnd, int32_t x, int32_t y);
+int32_t windowtests_send_wheel(void *hwnd, int32_t delta);
+int32_t windowtests_send_close(void *hwnd);
 
 // 1 when the C string at `p` is `s`.
 int32_t windowtests_cstr_is(const void *p, const char *s);
@@ -85,5 +91,7 @@ int32_t windowtests_report_sizes(const char *sel, double width, double height, i
 void windowtests_web_pad(int32_t slot, int32_t connected, int32_t standard, const char *id, const float *buttons,
                          int32_t nbuttons, const float *axes, int32_t naxes, int32_t effects);
 int32_t windowtests_web_rumbled(int32_t slot, float *motors, int32_t *milliseconds);
+// WIN-26: the tests' pad at `slot` last updated at `ms`, on performance.now()'s timeline: its `Gamepad.timestamp`.
+void windowtests_web_pad_at(int32_t slot, double ms);
 
 #endif

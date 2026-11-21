@@ -34,6 +34,8 @@ license; without it, pads are read through XInput.
   pointer's moves coalesce, scrolls of one unit sum, the sizes keep the last, and past 1024 records an event is counted
   into a `Dropped` where it happened, except an up, a cancel, a focus change, a lock and the sizes, which go on to 1536.
 - **Events come out one at a time, in the order they happened,** so a resize and a click stay in order.
+- **Each event comes out with the time it happened** (WIN-26), on kama's monotonic clock (below), and the times of the
+  events the system sends never run backwards in the order they come out.
 - **Nothing is dropped in silence.** A full ring keeps one slot for a `Dropped(n)` record, so a drop is reported where
   it happened, before anything that arrives once the reader makes room. Only an event that finds no free slot but the
   reserved ones is counted into the drop.
@@ -128,12 +130,15 @@ license; without it, pads are read through XInput.
 - **`Window.headless(width:, height:)`.**
 - **`pump()`** takes the system's pending events into the queue: every open window's, natively GLFW's and on the web
   the canvases' queues. Headless, nothing.
-- **`pollEvent() -> Optional<Event>`:** the oldest event, or `None` when the queue is empty.
-- **`post(event:)`:** an event into the queue as if the system had sent it: coalesced like one, and moving what is held
-  like one, so a posted `Focus` releases what is held first. A posted `Resize` also sets the size. A replayed stream
-  releases nothing twice: its recorded ups release their keys, and its `Focus` then finds nothing held.
-- **`releaseHeld()`:** an up for everything held, as a focus change makes them, with no `Focus` after: a program's own
-  release, for a reason only it knows (a remote desktop that drops key ups, a long stall).
+- **`pollEvent() -> Optional<TimedEvent>`:** the oldest event with its time, `t.event` and `t.at` (below), or `None`
+  when the queue is empty.
+- **`post(event:, at:)`:** an event into the queue as if the system had sent it at `at`, an `Instant`: coalesced like
+  one, and moving what is held like one, so a posted `Focus` releases what is held first, at its time. A posted
+  `Resize` also sets the size. A replayed stream releases nothing twice: its recorded ups release their keys, and its
+  `Focus` then finds nothing held. The event keeps `at` as given, earlier than the one before it too, so a test or a
+  replay places it where it wants.
+- **`releaseHeld()`:** an up for everything held, as a focus change makes them, with no `Focus` after, at the call's
+  time: a program's own release, for a reason only it knows (a remote desktop that drops key ups, a long stall).
 - **Sizes:**
   - `size() -> Size`, logical: on the web the canvas's CSS content box, rounded;
   - `framebufferSize() -> Size`, in pixels: on the web the canvas's exact device pixels from its ResizeObserver's
@@ -176,6 +181,25 @@ license; without it, pads are read through XInput.
 | `PadDisconnected(slot)` | after an up for each button it held |
 | `PadButtonDown(slot, button)`, `PadButtonUp(slot, button)` | a pad's button, paired as a key's: an up only after its down |
 | `Dropped(count)` | the queue was full, and this many events were lost |
+
+- **`TimedEvent`** is a plain value, the `event` and `at`, the time it happened (WIN-26): an `Instant` on kama's
+  monotonic clock, `std::time`'s, so it compares with `monotonicNow()` and with a frame's time, and a program can tell
+  which of its simulation steps an input belongs to. The C seam reads that clock through the package's own
+  `expose fn`, so the seam and the program read one clock. The time is the best each backend has:
+  - **natively,** the moment GLFW's callback ran (GLFW gives no time of its own, and calls back inside `pump()`, or
+    at once for a message sent to the window), and for a pad, the moment the pump read it;
+  - **on the web,** the browser's own: a DOM event's `timeStamp` and a pad's `Gamepad.timestamp`, on
+    `performance.now()`'s timeline, which kama's clock reads there, each held between the start of the pump before
+    and the start of the pump that takes it; a size report, which no event carries, the moment the page observed it.
+    A pad is read after the page's events in a pump, and a call's time is no earlier than what came before it, so a
+    time is raised to the one before it where the browser's would run backwards;
+  - **what the window makes takes its cause's time:** the releases and the lock given back that a `Focus` makes, the
+    `Focus`'s; a pad's connect, downs, ups and disconnect, its sample's; `releaseHeld()`'s ups, a headless window's
+    `PointerLock` and the pads let go by `setPadsWhenUnfocused(on: false)`, the call's;
+  - **a posted event keeps the time it is posted with** (`post(event:, at:)`, `postPad(slot:, pad:, at:)`).
+
+  A coalesced move or scroll takes the newest sample's time and a resize or scale change its last's; a `Dropped` the
+  time of the first event it counts, or, while the ring overflows, that of the up it keeps before it.
 
 - **`Mods`** are bits: `Shift`, `Control`, `Alt`, `Super`, `CapsLock` and `NumLock`, as in `(mods & Mods::Shift) != 0`.
 - **`Pointer`** is a plain value, a W3C PointerEvent's fields: `id` (the mouse is 1; each touch contact has its own,
@@ -231,7 +255,8 @@ system window reads the system's pads once and hands each slot to every open sys
 - **`Window::addPadMappings(text:) -> int32`:** mappings in SDL's text format, a mapping a line. Natively they are
   kept and applied at once and at each start of SDL, so a pad they name is mapped in its slot, and the number taken
   is returned; 0 when no system window is open (they apply when one opens), and on the web, where the browser maps.
-- **`postPad(slot:, pad:)`:** a sample as if the system had read it, for tests and replays. A posted `PadConnected`,
+- **`postPad(slot:, pad:, at:)`:** a sample as if the system had read it at `at`, for tests and replays, each event it
+  makes at `at`. A posted `PadConnected`,
   `PadButtonDown`, `PadButtonUp` or `PadDisconnected` moves the pad as the system would: a down presses its button all
   the way. `Gamepad.neutral()` is a pad at rest, `Gamepad.disconnected()` an empty slot, and `press`, `release`,
   `setValue` and `setAxis` set one.
@@ -292,7 +317,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 258 cases. They cover:
+- `tests/`, one program, natively, debug and release: 304 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - what is held, on a headless window (`tests/src/held.kama`): the pairing of ups and downs, `Key::Unknown`, the
     release's order and bits, the room kept for ups in a full ring, a replayed stream, and `releaseHeld`;
@@ -303,6 +328,13 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - GLFW's own focus path on a hidden system window, driven by Win32 messages sent to it, so it never takes the focus:
     GLFW's ups after the focus callback dropped, a key released once, either way;
   - the plain values;
+  - the times (`tests/src/times.kama`), on a headless window: a posted time kept as given; the newest sample's time
+    for a coalesced move or scroll and the last for a resize; a full ring's events each at their own and its
+    `Dropped` at the first it counts; the up the ring keeps before its `Dropped`; a focus loss's releases, a touch's
+    cancel and the lock it gives back at the `Focus`'s time; a posted pad's events at its sample's; and a call's
+    releases and lock at the call's time. Natively, on a hidden window driven by Win32 messages, a key, typed text, a
+    mouse move, the wheel, a close request, a resize and a focus loss each at the moment its callback ran, the leave
+    Windows posts after a move at the pump's, and a system pad at the moment the pump read it;
   - the names (`tests/src/names.kama`): every `Key`, `PadButton`, `PadAxis` and `PointerButton` read from its name and
     written as it, against a table of names and numbers in the test, a misspelling of each refused with the names
     listed, and a key's number refused in its name's place;
@@ -327,13 +359,17 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   The system windows are skipped when `KAMA_WINDOW_NO_DISPLAY` is set. **A test run never takes the keyboard:** every
   window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
   the program shows no more once one has taken the foreground;
-- the same program under node: 172 cases, the headless ones, the DOM key table, and checks that opening a window
+- the same program under node: 204 cases, the headless ones, the DOM key table, and checks that opening a window
   refuses with no page.
 - the same program built for the web with its own page, `tests/web/shell.html`, in every browser `tools/browsers.mjs`
   finds (`KAMA_BROWSER` names one), headless and at a device scale of 1.5: under `kama run --target WASM --scale 1.5` in
-  Edge, Chrome as installed and the pinned Firefox, 262 cases, every one but the trusted input; and through
-  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 273. Beside the headless ones (`tests/src/web.kama`):
+  Edge, Chrome as installed and the pinned Firefox, 311 cases, every one but the trusted input; and through
+  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 322. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
+  - the browser's times (`tests/src/times.kama`): a key, its text, a pointer, two wheels coalesced, a size report, a
+    blur and a focus each at its own time, two keys 30 ms apart keeping the gap, a page older than 4.3 s so a time fills both halves of
+    the record, an event taken after a call no earlier than the call, and a pad's `Gamepad.timestamp`: kept between
+    the pumps, held to the pump before when stale and to its pump when later, and raised to a key's taken before it;
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,
     pointers in the content box, chorded buttons, a touch's cancel, a pen's fields, the wheel's units, the page's

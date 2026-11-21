@@ -1,5 +1,7 @@
 // The C seam (csrc/winseam.h), as kama. An extern never leaves its file, so each is published through a wrapper.
 
+import { std::time::monotonicNow };
+
 export {
     winseam_event,
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_POINTER_MOVE, KIND_POINTER_DOWN, KIND_POINTER_UP, KIND_POINTER_CANCEL,
@@ -66,6 +68,7 @@ type extern value winseam_event {
     public float32 twist;
     public float32 width;
     public float32 height;
+    public uint64 at;
 }
 
 extern fn UnsafePtr winseam_open(UnsafeConstPtr<cchar> title, int32 width, int32 height, int32 focused,
@@ -88,7 +91,7 @@ extern fn int32 winseam_native_kind(UnsafePtr window);
 extern fn UnsafePtr winseam_native_display(UnsafePtr window);
 extern fn UnsafePtr winseam_native_window(UnsafePtr window);
 extern fn int32 winseam_glfw_key_to_hid(int32 glfw_key);
-extern fn void winseam_pad_sample(UnsafePtr window, int32 slot, UnsafeConstPtr<winseam_pad> sample);
+extern fn void winseam_pad_sample(UnsafePtr window, int32 slot, UnsafeConstPtr<winseam_pad> sample, uint64 at);
 extern fn void winseam_pad_read(UnsafePtr window, int32 slot, UnsafePtr into);
 extern fn void winseam_set_pads_when_unfocused(UnsafePtr window, int32 on);
 extern fn int32 winseam_pad_text(UnsafePtr window, int32 slot, int32 which, UnsafePtr<uint8> into, int32 capacity);
@@ -99,9 +102,14 @@ extern fn int32 winseam_pad_raw(UnsafePtr window, int32 slot, UnsafePtr<int32> c
                                 UnsafePtr<float32> axes, UnsafePtr<uint8> hats);
 extern fn int32 winseam_add_pad_mappings(UnsafeConstPtr<cchar> text, int32 length);
 
-unsafe fn void padSample(UnsafePtr window, int32 slot, const ref winseam_pad sample) {
-    winseam_pad_sample(window: window, slot: slot, sample: addr(of: sample));
+unsafe fn void padSample(UnsafePtr window, int32 slot, const ref winseam_pad sample, uint64 at) {
+    winseam_pad_sample(window: window, slot: slot, sample: addr(of: sample), at: at);
 }
+
+// kama's monotonic clock, for the C seam (WIN-26): what an event the system sends is stamped with, so the seam and a
+// program read one clock, `std::time`'s `Instant`.
+@linkName("winseam_now")
+expose fn uint64 seamNow() { return monotonicNow().rawNanos; }
 unsafe fn void padRead(UnsafePtr window, int32 slot, UnsafePtr into) { winseam_pad_read(window: window, slot: slot, into: into); }
 unsafe fn void setPadsWhenUnfocused(UnsafePtr window, int32 on) { winseam_set_pads_when_unfocused(window: window, on: on); }
 

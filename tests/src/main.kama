@@ -8,7 +8,8 @@ import {
     window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::Pointer,
     window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
     keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
-    pointerCases, mouseAt, webWindow, webFinish, padCases, systemPadCases, noSystemPads, nameCases,
+    pointerCases, mouseAt, webWindow, webFinish, padCases, systemPadCases, noSystemPads, nameCases, timeCases, timeSystem,
+    std::time::monotonicNow, window::TimedEvent,
 };
 
 export { Tally, describe, summary };
@@ -85,9 +86,9 @@ fn string describe(const ref Event e) {
 }
 
 unsafe fn string next(ref Window w) {
-    Optional<Event> e = w.pollEvent();
+    Optional<TimedEvent> e = w.pollEvent();
     return match (e) {
-        case Some(value: v): describe(e: v);
+        case Some(value: v): describe(e: v.event);
         case None: "(empty)";
     };
 }
@@ -109,18 +110,18 @@ unsafe fn void queueOrder(ref Tally t) {
     w.pump();   // nothing behind it: no events appear
     expectNext(t: t, w: w, name: "a new headless window's queue is empty", want: "(empty)");
 
-    w.post(event: Event::KeyDown(key: Key::KeyA, mods: Mods::Shift, repeat: false));
-    w.post(event: Event::PointerMove(pointer: mouseAt(x: 10.0, y: 20.0), dx: 1.0, dy: 2.0));
-    w.post(event: Event::PointerMove(pointer: mouseAt(x: 12.0, y: 25.0), dx: 2.0, dy: 5.0));
-    w.post(event: Event::PointerMove(pointer: mouseAt(x: 15.0, y: 30.0), dx: 3.0, dy: 5.0));
-    w.post(event: Event::PointerDown(pointer: mouseAt(x: 15.0, y: 30.0), button: PointerButton::Left, mods: 0));
-    w.post(event: Event::Scroll(dx: 0.0, dy: 1.0, unit: ScrollUnit::Lines));
-    w.post(event: Event::Scroll(dx: 0.0, dy: 2.0, unit: ScrollUnit::Lines));
-    w.post(event: Event::Resize(width: 800, height: 600));
-    w.post(event: Event::Resize(width: 1024, height: 768));
-    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0));
-    w.post(event: Event::Text(c: 'é'));
-    w.post(event: Event::CloseRequested);
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: Mods::Shift, repeat: false), at: monotonicNow());
+    w.post(event: Event::PointerMove(pointer: mouseAt(x: 10.0, y: 20.0), dx: 1.0, dy: 2.0), at: monotonicNow());
+    w.post(event: Event::PointerMove(pointer: mouseAt(x: 12.0, y: 25.0), dx: 2.0, dy: 5.0), at: monotonicNow());
+    w.post(event: Event::PointerMove(pointer: mouseAt(x: 15.0, y: 30.0), dx: 3.0, dy: 5.0), at: monotonicNow());
+    w.post(event: Event::PointerDown(pointer: mouseAt(x: 15.0, y: 30.0), button: PointerButton::Left, mods: 0), at: monotonicNow());
+    w.post(event: Event::Scroll(dx: 0.0, dy: 1.0, unit: ScrollUnit::Lines), at: monotonicNow());
+    w.post(event: Event::Scroll(dx: 0.0, dy: 2.0, unit: ScrollUnit::Lines), at: monotonicNow());
+    w.post(event: Event::Resize(width: 800, height: 600), at: monotonicNow());
+    w.post(event: Event::Resize(width: 1024, height: 768), at: monotonicNow());
+    w.post(event: Event::KeyUp(key: Key::KeyA, mods: 0), at: monotonicNow());
+    w.post(event: Event::Text(c: 'é'), at: monotonicNow());
+    w.post(event: Event::CloseRequested, at: monotonicNow());
 
     expectNext(t: t, w: w, name: "a key down comes back first, with its mods", want: "KeyDown 4 1 false");
     expectNext(t: t, w: w, name: "three moves coalesce: the last position, the summed motion",
@@ -160,7 +161,7 @@ unsafe fn void queueDrops(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
     int32 i = 0;
     while (i < 300) {
-        w.post(event: Event::Text(c: 'x'));
+        w.post(event: Event::Text(c: 'x'), at: monotonicNow());
         i = i + 1;
     }
     int32 keys = 0;
@@ -177,7 +178,7 @@ unsafe fn void queueDrops(ref Tally t) {
                   why: "${keys} events, then `${last}`");
     }
     expectNext(t: t, w: w, name: "the drop is reported once", want: "(empty)");
-    w.post(event: Event::Focus(focused: true));
+    w.post(event: Event::Focus(focused: true), at: monotonicNow());
     expectNext(t: t, w: w, name: "the drained ring takes events again", want: "Focus true");
 }
 
@@ -189,14 +190,14 @@ unsafe fn void queueDropsPartial(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
     int32 i = 0;
     while (i < 300) {
-        w.post(event: Event::Text(c: 'x'));
+        w.post(event: Event::Text(c: 'x'), at: monotonicNow());
         i = i + 1;
     }
     string first = next(w: w);   // one read: only the slot the Dropped record holds is past the reserve
-    w.post(event: Event::Focus(focused: true));
+    w.post(event: Event::Focus(focused: true), at: monotonicNow());
     i = 1;
     while (i < 100) { string skipped = next(w: w); i = i + 1; }   // 100 read in all: room for 99 more
-    w.post(event: Event::Text(c: 'a'));
+    w.post(event: Event::Text(c: 'a'), at: monotonicNow());
     int32 keys = 0;
     string after = "";
     bool reading = true;
@@ -265,6 +266,7 @@ unsafe fn uint8 appMain() {
     queueOrder(t: t);
     plainValues(t: t);
     nameCases(t: t);
+    timeCases(t: t);
     queueDrops(t: t);
     queueDropsPartial(t: t);
     heldCases(t: t);
@@ -274,6 +276,7 @@ unsafe fn uint8 appMain() {
     buttonTable(t: t);
     nativeHandles(t: t);
     heldSystem(t: t);
+    timeSystem(t: t);
     openOptions(t: t);
     if (focusCases(t: t)) {
         systemWindow(t: t);

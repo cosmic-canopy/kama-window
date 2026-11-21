@@ -15,11 +15,10 @@
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
 
-## NOW: what kyoten's input (its first slice's step 8) needs, then waiting on kama
+## NOW: waiting on kama
 
 | id | item | why |
 |---|---|---|
-| WIN-26 | **Each event's time**, on kama's monotonic clock, the best its backend has | [detail](ROADMAP_DETAIL.md#event-times) |
 | WIN-24 | **The driver retired**: trusted input and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform

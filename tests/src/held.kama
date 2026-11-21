@@ -11,6 +11,7 @@ import {
     Tally, describe, quietly, mouseAt,
     window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::CursorMode,
     window::NativeWindow,
+    std::time::monotonicNow, window::TimedEvent,
 };
 export { heldCases, heldSystem, drained, expectDrained };
 
@@ -39,10 +40,10 @@ unsafe fn string drained(ref Window w) {
     int32 run = 0;
     bool reading = true;
     while (reading) {
-        Optional<Event> e = w.pollEvent();
+        Optional<TimedEvent> e = w.pollEvent();
         match (e) {
             case Some(value: v): {
-                string one = describe(e: v);
+                string one = describe(e: v.event);
                 if (run > 0 && one == last) { run = run + 1; }
                 else { all = joined(all: all, one: last, run: run); last = copy one; run = 1; }
             }
@@ -61,17 +62,17 @@ unsafe fn void expectDrained(ref Tally t, ref Window w, const ref string name, c
 // `count` typed characters, which no held-set rule touches: what fills a ring here.
 unsafe fn void fill(ref Window w, int32 count) {
     int32 i = 0;
-    while (i < count) { w.post(event: Event::Text(c: 'x')); i = i + 1; }
+    while (i < count) { w.post(event: Event::Text(c: 'x'), at: monotonicNow()); i = i + 1; }
 }
 
-unsafe fn void down(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyDown(key: key, mods: mods, repeat: false)); }
-unsafe fn void up(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyUp(key: key, mods: mods)); }
+unsafe fn void down(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyDown(key: key, mods: mods, repeat: false), at: monotonicNow()); }
+unsafe fn void up(ref Window w, Key key, uint8 mods) { w.post(event: Event::KeyUp(key: key, mods: mods), at: monotonicNow()); }
 // The mouse's button `which` down or up, at the origin.
 unsafe fn void button(ref Window w, PointerButton which, bool pressed, uint8 mods) {
-    if (pressed) { w.post(event: Event::PointerDown(pointer: mouseAt(x: 0.0, y: 0.0), button: which, mods: mods)); }
-    else { w.post(event: Event::PointerUp(pointer: mouseAt(x: 0.0, y: 0.0), button: which, mods: mods)); }
+    if (pressed) { w.post(event: Event::PointerDown(pointer: mouseAt(x: 0.0, y: 0.0), button: which, mods: mods), at: monotonicNow()); }
+    else { w.post(event: Event::PointerUp(pointer: mouseAt(x: 0.0, y: 0.0), button: which, mods: mods), at: monotonicNow()); }
 }
-unsafe fn void focus(ref Window w, bool focused) { w.post(event: Event::Focus(focused: focused)); }
+unsafe fn void focus(ref Window w, bool focused) { w.post(event: Event::Focus(focused: focused), at: monotonicNow()); }
 
 // Decision 1: an up for what the window does not hold is dropped, and the window, not the system, says what a repeat is.
 unsafe fn void pairing(ref Tally t) {
@@ -80,7 +81,7 @@ unsafe fn void pairing(ref Tally t) {
     expectDrained(t: t, w: a, name: "an up for a key never down is dropped", want: "");
 
     Window b = Window.headless(width: 64, height: 64);
-    b.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true));
+    b.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true), at: monotonicNow());
     expectDrained(t: t, w: b, name: "a down for a key not held is a press, though the system called it a repeat",
                   want: "KeyDown 26 0 false");
 
@@ -100,7 +101,7 @@ unsafe fn void pairing(ref Tally t) {
     Window e = Window.headless(width: 64, height: 64);
     down(w: e, key: Key::KeyW, mods: 0);
     up(w: e, key: Key::KeyW, mods: 0);
-    e.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true));
+    e.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true), at: monotonicNow());
     expectDrained(t: t, w: e, name: "a released key's next down is a press again",
                   want: "KeyDown 26 0 false; KeyUp 26 0; KeyDown 26 0 false");
 
@@ -137,7 +138,7 @@ unsafe fn void pairing(ref Tally t) {
 unsafe fn void unknownKeys(ref Tally t) {
     Window a = Window.headless(width: 64, height: 64);
     down(w: a, key: Key::Unknown, mods: 0);
-    a.post(event: Event::KeyDown(key: Key::Unknown, mods: 0, repeat: true));
+    a.post(event: Event::KeyDown(key: Key::Unknown, mods: 0, repeat: true), at: monotonicNow());
     up(w: a, key: Key::Unknown, mods: 0);
     up(w: a, key: Key::Unknown, mods: 0);
     expectDrained(t: t, w: a, name: "an unknown key's downs and ups pass as the system sends them",
@@ -265,7 +266,7 @@ unsafe fn void reserve(ref Tally t) {
     up(w: d, key: Key::KeyW, mods: 0);
     expectDrained(t: t, w: d, name: "a down that finds no room is counted into the drop and not held, so its up is dropped",
                   want: "Text 120 ×255; Dropped 1");
-    d.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true));
+    d.post(event: Event::KeyDown(key: Key::KeyW, mods: 0, repeat: true), at: monotonicNow());
     expectDrained(t: t, w: d, name: "and the key's next repeat is a press", want: "KeyDown 26 0 false");
 
     Window e = Window.headless(width: 64, height: 64);

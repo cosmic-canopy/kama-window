@@ -13,6 +13,7 @@ import {
     Tally, describe, expectDrained, mouseAt, quietly,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Key, window::PointerButton,
     window::Gamepad, window::PadButton, window::PadAxis, window::PadRaw,
+    std::time::monotonicNow, window::TimedEvent,
 };
 export { padCases };
 
@@ -33,15 +34,15 @@ unsafe fn void connectAndPress(ref Tally t) {
     Gamepad before = w.pad(slot: 0);
     check(t: t, name: "an empty slot reads disconnected", ok: !before.connected, why: "it reads connected");
 
-    w.postPad(slot: 0, pad: Gamepad.neutral());
+    w.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a pad's first sample connects it", want: "PadConnected 0");
     Gamepad now = w.pad(slot: 0);
     check(t: t, name: "a connected pad reads connected", ok: now.connected, why: "it reads disconnected");
 
-    w.postPad(slot: 0, pad: Gamepad.neutral());
+    w.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "the same sample again is no event", want: "");
 
-    w.postPad(slot: 0, pad: pressing(button: PadButton::South));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a button pressed in a sample is a down", want: "PadButtonDown 0 0");
     Gamepad held = w.pad(slot: 0);
     check(t: t, name: "the pressed button reads pressed, at its value",
@@ -49,29 +50,29 @@ unsafe fn void connectAndPress(ref Tally t) {
               && !held.pressed(button: PadButton::East),
           why: "South does not read pressed at 1");
 
-    w.postPad(slot: 0, pad: pressing(button: PadButton::South));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a button still pressed is no second down", want: "");
 
-    w.postPad(slot: 0, pad: Gamepad.neutral());
+    w.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a button released in a sample is an up", want: "PadButtonUp 0 0");
 
-    w.postPad(slot: 0, pad: pressing(button: PadButton::South));
-    w.postPad(slot: 0, pad: pressing(button: PadButton::East));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
+    w.postPad(slot: 0, pad: pressing(button: PadButton::East), at: monotonicNow());
     expectDrained(t: t, w: w, name: "within one sample the ups come before the downs",
                   want: "PadButtonDown 0 0; PadButtonUp 0 0; PadButtonDown 0 1");
 
     Gamepad two = Gamepad.neutral();
     two.press(button: PadButton::North);
     two.press(button: PadButton::West);
-    w.postPad(slot: 0, pad: two);
+    w.postPad(slot: 0, pad: two, at: monotonicNow());
     expectDrained(t: t, w: w, name: "several buttons go up, then down, by their number",
                   want: "PadButtonUp 0 1; PadButtonDown 0 2; PadButtonDown 0 3");
 
     Window s = Window.headless(width: 64, height: 64);
-    s.postPad(slot: 3, pad: pressing(button: PadButton::Guide));
+    s.postPad(slot: 3, pad: pressing(button: PadButton::Guide), at: monotonicNow());
     expectDrained(t: t, w: s, name: "a pad first seen pressing a button connects, then goes down",
                   want: "PadConnected 3; PadButtonDown 3 16");
-    s.postPad(slot: 1, pad: Gamepad.neutral());
+    s.postPad(slot: 1, pad: Gamepad.neutral(), at: monotonicNow());
     Gamepad other = s.pad(slot: 1);
     Gamepad first = s.pad(slot: 3);
     check(t: t, name: "each slot is a pad of its own",
@@ -87,7 +88,7 @@ unsafe fn void valuesAndTriggers(ref Tally t) {
     g.setAxis(axis: PadAxis::LeftX, value: 0.01);
     g.setAxis(axis: PadAxis::RightY, value: -0.73);
     g.setValue(button: PadButton::LeftTrigger, value: 0.5);
-    w.postPad(slot: 0, pad: g);
+    w.postPad(slot: 0, pad: g, at: monotonicNow());
     Gamepad r = w.pad(slot: 0);
     check(t: t, name: "the sticks are reported untouched: no dead zone",
           ok: r.axis(axis: PadAxis::LeftX) == 0.01 && r.axis(axis: PadAxis::RightY) == -0.73
@@ -100,7 +101,7 @@ unsafe fn void valuesAndTriggers(ref Tally t) {
     Window k = Window.headless(width: 64, height: 64);
     Gamepad below = Gamepad.neutral();
     below.setValue(button: PadButton::RightTrigger, value: cast<float32>(29.0 / 255.0));
-    k.postPad(slot: 0, pad: below);
+    k.postPad(slot: 0, pad: below, at: monotonicNow());
     Gamepad rb = k.pad(slot: 0);
     check(t: t, name: "a trigger at 29 of 255 is not pressed", ok: !rb.pressed(button: PadButton::RightTrigger),
           why: "it reads pressed");
@@ -108,7 +109,7 @@ unsafe fn void valuesAndTriggers(ref Tally t) {
 
     Gamepad at = Gamepad.neutral();
     at.setValue(button: PadButton::RightTrigger, value: Gamepad::PressedAt);
-    k.postPad(slot: 0, pad: at);
+    k.postPad(slot: 0, pad: at, at: monotonicNow());
     Gamepad ra = k.pad(slot: 0);
     check(t: t, name: "a trigger at 30 of 255 is pressed", ok: ra.pressed(button: PadButton::RightTrigger),
           why: "it reads not pressed");
@@ -123,16 +124,16 @@ unsafe fn void disconnect(ref Tally t) {
     Gamepad g = Gamepad.neutral();
     g.press(button: PadButton::South);
     g.press(button: PadButton::DpadLeft);
-    w.postPad(slot: 2, pad: g);
-    w.postPad(slot: 2, pad: Gamepad.disconnected());
+    w.postPad(slot: 2, pad: g, at: monotonicNow());
+    w.postPad(slot: 2, pad: Gamepad.disconnected(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a disconnect releases each held button, then disconnects",
                   want: "PadConnected 2; PadButtonDown 2 0; PadButtonDown 2 14; PadButtonUp 2 0; PadButtonUp 2 14; PadDisconnected 2");
     Gamepad gone = w.pad(slot: 2);
     check(t: t, name: "a disconnected slot reads disconnected and at rest",
           ok: !gone.connected && gone.value(button: PadButton::South) == 0.0, why: "connected ${gone.connected}");
-    w.postPad(slot: 2, pad: Gamepad.disconnected());
+    w.postPad(slot: 2, pad: Gamepad.disconnected(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a second disconnect is no event", want: "");
-    w.postPad(slot: 2, pad: Gamepad.neutral());
+    w.postPad(slot: 2, pad: Gamepad.neutral(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a pad back in the slot connects again", want: "PadConnected 2");
 }
 
@@ -141,13 +142,13 @@ unsafe fn void disconnect(ref Tally t) {
 // with the next sample, not before.
 unsafe fn void focusRelease(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
-    w.post(event: Event::PointerDown(pointer: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Left, mods: 0));
-    w.postPad(slot: 1, pad: pressing(button: PadButton::South));
-    w.postPad(slot: 0, pad: pressing(button: PadButton::East));
-    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false));
+    w.post(event: Event::PointerDown(pointer: mouseAt(x: 0.0, y: 0.0), button: PointerButton::Left, mods: 0), at: monotonicNow());
+    w.postPad(slot: 1, pad: pressing(button: PadButton::South), at: monotonicNow());
+    w.postPad(slot: 0, pad: pressing(button: PadButton::East), at: monotonicNow());
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a mouse button, two pads' buttons and a key go down",
                   want: "PointerDown mouse1 0 0 [1]; PadConnected 1; PadButtonDown 1 0; PadConnected 0; PadButtonDown 0 1; KeyDown 4 0 false");
-    w.post(event: Event::Focus(focused: false));
+    w.post(event: Event::Focus(focused: false), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a focus loss releases the mouse, then the pads by slot, then the keys",
                   want: "PointerUp mouse1 0 0 [0]; PadButtonUp 0 1; PadButtonUp 1 0; KeyUp 4 0; Focus false");
 
@@ -158,18 +159,18 @@ unsafe fn void focusRelease(ref Tally t) {
           why: "it reads disconnected, or East held");
     Gamepad leaning = pressing(button: PadButton::East);
     leaning.setAxis(axis: PadAxis::LeftX, value: 0.9);
-    w.postPad(slot: 0, pad: leaning);
+    w.postPad(slot: 0, pad: leaning, at: monotonicNow());
     expectDrained(t: t, w: w, name: "unfocused, a sample makes no events", want: "");
     Gamepad stillNeutral = w.pad(slot: 0);
     check(t: t, name: "unfocused, a sample's sticks read centred", ok: stillNeutral.axis(axis: PadAxis::LeftX) == 0.0,
           why: "LeftX reads off centre");
 
-    w.post(event: Event::Focus(focused: true));
+    w.post(event: Event::Focus(focused: true), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a focus gain is only Focus: nothing until the next sample", want: "Focus true");
     Gamepad stale = w.pad(slot: 0);
     check(t: t, name: "after a gain, a pad reads neutral until the next sample",
           ok: !stale.pressed(button: PadButton::East), why: "it reads East pressed");
-    w.postPad(slot: 0, pad: leaning);
+    w.postPad(slot: 0, pad: leaning, at: monotonicNow());
     expectDrained(t: t, w: w, name: "a button still held comes back as a down with the next sample",
                   want: "PadButtonDown 0 1");
     Gamepad back = w.pad(slot: 0);
@@ -178,10 +179,10 @@ unsafe fn void focusRelease(ref Tally t) {
           why: "East or LeftX read other than sampled");
 
     Window g = Window.headless(width: 64, height: 64);
-    g.postPad(slot: 0, pad: Gamepad.neutral());
-    g.post(event: Event::Focus(focused: false));
-    g.postPad(slot: 0, pad: Gamepad.disconnected());
-    g.postPad(slot: 1, pad: pressing(button: PadButton::South));
+    g.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
+    g.post(event: Event::Focus(focused: false), at: monotonicNow());
+    g.postPad(slot: 0, pad: Gamepad.disconnected(), at: monotonicNow());
+    g.postPad(slot: 1, pad: pressing(button: PadButton::South), at: monotonicNow());
     expectDrained(t: t, w: g, name: "unfocused, a pad still connects and disconnects",
                   want: "PadConnected 0; Focus false; PadDisconnected 0; PadConnected 1");
 }
@@ -190,12 +191,12 @@ unsafe fn void focusRelease(ref Tally t) {
 unsafe fn void background(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
     w.setPadsWhenUnfocused(on: true);
-    w.postPad(slot: 0, pad: pressing(button: PadButton::South));
-    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false));
-    w.post(event: Event::Focus(focused: false));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false), at: monotonicNow());
+    w.post(event: Event::Focus(focused: false), at: monotonicNow());
     expectDrained(t: t, w: w, name: "with pads in the background, a focus loss releases the keys and no pad",
                   want: "PadConnected 0; PadButtonDown 0 0; KeyDown 4 0 false; KeyUp 4 0; Focus false");
-    w.postPad(slot: 0, pad: pressing(button: PadButton::North));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::North), at: monotonicNow());
     expectDrained(t: t, w: w, name: "with pads in the background, an unfocused window's pad makes events",
                   want: "PadButtonUp 0 0; PadButtonDown 0 3");
     Gamepad live = w.pad(slot: 0);
@@ -213,12 +214,12 @@ unsafe fn void background(ref Tally t) {
 // A program's own release (`releaseHeld`) lets go of the pads too, and the next sample brings back what is still held.
 unsafe fn void programRelease(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
-    w.postPad(slot: 0, pad: pressing(button: PadButton::Start));
-    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::Start), at: monotonicNow());
+    w.post(event: Event::KeyDown(key: Key::KeyA, mods: 0, repeat: false), at: monotonicNow());
     w.releaseHeld();
     expectDrained(t: t, w: w, name: "releaseHeld lets go of a pad's buttons before the keys",
                   want: "PadConnected 0; PadButtonDown 0 9; KeyDown 4 0 false; PadButtonUp 0 9; KeyUp 4 0");
-    w.postPad(slot: 0, pad: pressing(button: PadButton::Start));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::Start), at: monotonicNow());
     expectDrained(t: t, w: w, name: "after releaseHeld, a button still held comes back with the next sample",
                   want: "PadButtonDown 0 9");
 }
@@ -227,39 +228,39 @@ unsafe fn void programRelease(ref Tally t) {
 // disconnect do what they say.
 unsafe fn void postedEvents(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
-    w.post(event: Event::PadButtonDown(slot: 2, button: PadButton::North));
+    w.post(event: Event::PadButtonDown(slot: 2, button: PadButton::North), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a posted down on a pad not yet seen connects it first",
                   want: "PadConnected 2; PadButtonDown 2 3");
     Gamepad p = w.pad(slot: 2);
     check(t: t, name: "a posted down presses its button fully",
           ok: p.pressed(button: PadButton::North) && p.value(button: PadButton::North) == 1.0, why: "it does not");
-    w.post(event: Event::PadButtonDown(slot: 2, button: PadButton::North));
-    w.post(event: Event::PadButtonUp(slot: 2, button: PadButton::North));
-    w.post(event: Event::PadButtonUp(slot: 2, button: PadButton::North));
+    w.post(event: Event::PadButtonDown(slot: 2, button: PadButton::North), at: monotonicNow());
+    w.post(event: Event::PadButtonUp(slot: 2, button: PadButton::North), at: monotonicNow());
+    w.post(event: Event::PadButtonUp(slot: 2, button: PadButton::North), at: monotonicNow());
     expectDrained(t: t, w: w, name: "posted downs and ups pair as the window holds them", want: "PadButtonUp 2 3");
-    w.post(event: Event::PadButtonDown(slot: 2, button: PadButton::DpadUp));
-    w.post(event: Event::PadConnected(slot: 2));
+    w.post(event: Event::PadButtonDown(slot: 2, button: PadButton::DpadUp), at: monotonicNow());
+    w.post(event: Event::PadConnected(slot: 2), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a posted connect for a connected pad is no event, and lets go of nothing",
                   want: "PadButtonDown 2 12");
-    w.post(event: Event::PadDisconnected(slot: 2));
+    w.post(event: Event::PadDisconnected(slot: 2), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a posted disconnect releases, then disconnects",
                   want: "PadButtonUp 2 12; PadDisconnected 2");
-    w.post(event: Event::PadConnected(slot: 5));
+    w.post(event: Event::PadConnected(slot: 5), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a posted connect connects a pad at rest", want: "PadConnected 5");
-    w.post(event: Event::PadButtonUp(slot: 7, button: PadButton::South));
+    w.post(event: Event::PadButtonUp(slot: 7, button: PadButton::South), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a posted up for a pad never seen is dropped, and connects nothing", want: "");
 }
 
 // Slots are 0 to 15; any other is ignored.
 unsafe fn void slots(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
-    w.postPad(slot: 16, pad: pressing(button: PadButton::South));
-    w.postPad(slot: -1, pad: pressing(button: PadButton::South));
-    w.post(event: Event::PadButtonDown(slot: 16, button: PadButton::South));
+    w.postPad(slot: 16, pad: pressing(button: PadButton::South), at: monotonicNow());
+    w.postPad(slot: -1, pad: pressing(button: PadButton::South), at: monotonicNow());
+    w.post(event: Event::PadButtonDown(slot: 16, button: PadButton::South), at: monotonicNow());
     expectDrained(t: t, w: w, name: "a slot outside 0 to 15 is ignored", want: "");
     Gamepad outside = w.pad(slot: 16);
     check(t: t, name: "a slot outside 0 to 15 reads disconnected", ok: !outside.connected, why: "it reads connected");
-    w.postPad(slot: 15, pad: Gamepad.neutral());
+    w.postPad(slot: 15, pad: Gamepad.neutral(), at: monotonicNow());
     expectDrained(t: t, w: w, name: "slot 15 is the last", want: "PadConnected 15");
     check(t: t, name: "a window has 16 pad slots", ok: Window::PadSlots == 16, why: "another number");
 }
@@ -267,7 +268,7 @@ unsafe fn void slots(ref Tally t) {
 // `count` typed characters, which no held-set rule touches: what fills a ring here.
 unsafe fn void fill(ref Window w, int32 count) {
     int32 i = 0;
-    while (i < count) { w.post(event: Event::Text(c: 'x')); i = i + 1; }
+    while (i < count) { w.post(event: Event::Text(c: 'x'), at: monotonicNow()); i = i + 1; }
 }
 
 // Every event left in the queue, as one string, from the n-th on: what the cases below compare after a run of text.
@@ -275,10 +276,10 @@ unsafe fn string tail(ref Window w) {
     string all = "";
     bool reading = true;
     while (reading) {
-        Optional<Event> e = w.pollEvent();
+        Optional<TimedEvent> e = w.pollEvent();
         match (e) {
             case Some(value: v): {
-                string one = describe(e: v);
+                string one = describe(e: v.event);
                 if (one != "Text 120") {
                     if (all.isEmpty()) { all = copy one; } else { all = "${all}; ${one}"; }
                 }
@@ -293,35 +294,35 @@ unsafe fn string tail(ref Window w) {
 // a full ring never loses one. A down or a connect counted into a drop was never seen, so the next sample brings it.
 unsafe fn void fullRing(ref Tally t) {
     Window w = Window.headless(width: 64, height: 64);
-    w.postPad(slot: 0, pad: pressing(button: PadButton::South));
+    w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
     fill(w: w, count: 300);
-    w.postPad(slot: 0, pad: Gamepad.disconnected());
+    w.postPad(slot: 0, pad: Gamepad.disconnected(), at: monotonicNow());
     string got = tail(w: w);
     check(t: t, name: "a full ring still delivers a held pad button's up and the pad's disconnect",
           ok: got.contains(substring: "PadButtonUp 0 0") && got.contains(substring: "PadDisconnected 0"), why: "got `${got}`");
 
     Window d = Window.headless(width: 64, height: 64);
     fill(w: d, count: 300);
-    d.postPad(slot: 0, pad: pressing(button: PadButton::South));
+    d.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
     string dropped = tail(w: d);
     check(t: t, name: "a pad seen while the ring is full is counted into the drop",
           ok: !dropped.contains(substring: "PadConnected") && dropped.contains(substring: "Dropped"), why: "got `${dropped}`");
     Gamepad unseen = d.pad(slot: 0);
     check(t: t, name: "a pad whose connect was dropped reads disconnected", ok: !unseen.connected,
           why: "it reads connected");
-    d.postPad(slot: 0, pad: pressing(button: PadButton::South));
+    d.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
     expectDrained(t: t, w: d, name: "the next sample brings a dropped connect and down",
                   want: "PadConnected 0; PadButtonDown 0 0");
 
     Window k = Window.headless(width: 64, height: 64);
-    k.postPad(slot: 0, pad: Gamepad.neutral());
+    k.postPad(slot: 0, pad: Gamepad.neutral(), at: monotonicNow());
     fill(w: k, count: 300);
-    k.postPad(slot: 0, pad: pressing(button: PadButton::East));
+    k.postPad(slot: 0, pad: pressing(button: PadButton::East), at: monotonicNow());
     string lost = tail(w: k);
     check(t: t, name: "a known pad's down while the ring is full is counted into the drop",
           ok: lost.contains(substring: "PadConnected 0") && !lost.contains(substring: "PadButtonDown"),
           why: "got `${lost}`");
-    k.postPad(slot: 0, pad: pressing(button: PadButton::East));
+    k.postPad(slot: 0, pad: pressing(button: PadButton::East), at: monotonicNow());
     expectDrained(t: t, w: k, name: "the next sample brings a dropped down", want: "PadButtonDown 0 1");
 }
 
@@ -335,7 +336,7 @@ unsafe fn void systemWindowPads(ref Tally t) {
                                                         options: quietly());
     match (give quiet) {
         case Ok(value: w): {
-            w.postPad(slot: 0, pad: pressing(button: PadButton::South));
+            w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
             expectDrained(t: t, w: w, name: "a system window opened unfocused makes no pad downs",
                           want: "PadConnected 0");
         }
@@ -350,7 +351,7 @@ unsafe fn void systemWindowPads(ref Tally t) {
                                                              options: o);
     match (give behind) {
         case Ok(value: w): {
-            w.postPad(slot: 0, pad: pressing(button: PadButton::South));
+            w.postPad(slot: 0, pad: pressing(button: PadButton::South), at: monotonicNow());
             expectDrained(t: t, w: w, name: "a system window opened with pads in the background reads them unfocused",
                           want: "PadConnected 0; PadButtonDown 0 0");
         }

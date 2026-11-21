@@ -90,7 +90,24 @@ typedef struct winseam_event {
     float twist;            // degrees, 0 to 359
     float width;            // the contact's size, logical
     float height;
+    uint64_t at;            // when it happened: nanoseconds on kama's monotonic clock (`std::time`'s `Instant`)
 } winseam_event;
+
+// Each event's time (WIN-26), on kama's monotonic clock, which `winseam_now` reads: the package's `expose fn`, so the C
+// seam and kama read one clock. The best each backend has:
+// - natively, the moment GLFW's callback runs (GLFW gives no time of its own, and calls back inside `glfwPollEvents`)
+//   and the moment the pump reads the pads;
+// - on the web, the DOM event's `timeStamp` and a pad's `Gamepad.timestamp`, on `performance.now()`'s timeline, which
+//   kama's clock reads there, held to the pumps: no earlier than the one before the pump that takes it, no later than
+//   that pump;
+// - every event the system sends no earlier than the one before it in its window, so the times run in the order the
+//   events come out;
+// - what the window makes takes its cause's time: the ups a focus change makes, the `Focus`'s; a pad's events, its
+//   sample's; `winseam_release_held`'s ups and a cursor's `PointerLock`, the call's;
+// - a posted record keeps its own, which `winseam_post` and `winseam_pad_sample` take as they are given.
+// A coalesced move or scroll takes the newest sample's time, a resize or a scale its last's, and a `Dropped` the time
+// of the first event it counts, or of the owed up the ring puts before it while it overflows.
+uint64_t winseam_now(void);
 
 typedef struct winseam_window winseam_window;
 
@@ -129,9 +146,9 @@ void winseam_post(winseam_window *window, const winseam_event *event);
 // reads neutral until its next sample.
 void winseam_release_held(winseam_window *window);
 
-// A pad's sample into slot `slot` (0 to WINSEAM_PADS - 1, any other ignored) as if the system had read it: compared with
-// what the consumer has seen, it makes the slot's events.
-void winseam_pad_sample(winseam_window *window, int32_t slot, const winseam_pad *sample);
+// A pad's sample into slot `slot` (0 to WINSEAM_PADS - 1, any other ignored) as if the system had read it at `at`:
+// compared with what the consumer has seen, it makes the slot's events, each at `at`.
+void winseam_pad_sample(winseam_window *window, int32_t slot, const winseam_pad *sample, uint64_t at);
 // The pad in `slot` as the consumer reads it: connected once its connect is queued; neutral while the window is unfocused
 // (unless pads are read in the background) and after a release until its next sample; all 0 for an empty slot.
 void winseam_pad_read(winseam_window *window, int32_t slot, winseam_pad *into);
