@@ -33,8 +33,8 @@ best its backend has.
   (`:939`), and an XInput pad with the poll's (`SDL_xinputjoystick.c:336`).
 - **A posted event** takes the time it is posted with, so a replay keeps its own.
 
-**The row's question, the shape** (asked at kyoten's forty-fourth session's readying, 2026-11-21). The callers that
-change: this package's tests (14 `pollEvent`s, 74 `post`s), `@kama/gpu`'s 2, `@kama/graphics`' 2 and kyoten's 1.
+**The row's question, the shape: decided (A)** (the owner, 2026-11-21, "A sounds good to me so far", asked at kyoten's
+forty-fourth session's readying; "so far": a change the build finds is asked). The callers that change: this package's tests (14 `pollEvent`s, 74 `post`s), `@kama/gpu`'s 2, `@kama/graphics`' 2 and kyoten's 1.
 - **(A)** `pollEvent()` hands back the event with its time, `Optional<TimedEvent>`, a plain value of `event` and `at`
   (an `Instant`), and `post(event:, at:)` takes one, a test's or a replay's own. Every caller changes once, reading
   `t.event` where it read the event. SDL keeps the time in every event's header, and Unity's events carry theirs.
