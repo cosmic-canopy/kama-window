@@ -5,6 +5,11 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **A key's and a button's name** (WIN-25, 2026-11-21, kama 0.9.978): `Key`, `PadButton`, `PadAxis` and
+  `PointerButton` are read and written by their case's name (`@generate(Serializable, Deserializable)`), so a
+  bindings record names `"ArrowUp"` or `"RightShoulder"` as this package does, with no second table of names, and a
+  misspelling is refused with every name listed. For kyoten's bindings records (its `docs/design/input.md`,
+  2026-11-21). `tests/` gains `names.kama`, 9 cases on every leg.
 - **Fixed: a release build for the web lost its keyboard and a pad's rumble effects under Closure** (2026-11-17, kama
   0.9.966; AGENTS.window.md item 11). kama 0.9.966 runs Closure over a wasm release (KR-289). Closure renamed the
   DOM-code table's keys, so every key reached a program as `Key::Unknown`, and a pad's `effects`, so its trigger rumble

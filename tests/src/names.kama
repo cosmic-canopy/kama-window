@@ -1,0 +1,1007 @@
+// WIN-25: a key's and a button's name. A bindings record names a control by the package's own names (kyoten's
+// docs/design/input.md, 2026-11-21), so each enum reads and writes each case by its name, and a misspelling is refused
+// with the names listed. The names and numbers are written here, not taken from the enums, so a case renamed in the
+// package fails here by name: a saved binding would stop reading.
+
+import {
+    std::memory::Owned,
+    std::serialization::text::json::serializeJsonBuffer, std::serialization::text::json::deserializeJsonBuffer,
+    Tally, window::Key, window::PadButton, window::PadAxis, window::PointerButton,
+};
+export { nameCases };
+
+// a key: its name read back to its number, and its number written as its name; "" when both hold.
+fn string keyWrong(const ref string name, int32 number) {
+    string text = "\"" + name + "\"";
+    Result<Key, Owned<Error>> read = deserializeJsonBuffer::<Key>(src: copy text, strict: true);
+    string why = match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            if (got == number) { return ""; }
+            return "read as ${got}";
+        }
+        case Err(error: e): e.message();
+    };
+    return why;
+}
+
+fn string keyWritten(const ref string name, int32 number) {
+    Optional<Key> c = try cast<Key>(cast<uint16>(number));
+    match (c) {
+        case Some(value: v): {
+            Result<string, Owned<Error>> r = serializeJsonBuffer(v: v);
+            match (r) {
+                case Ok(value: t): {
+                    string want = "\"" + name + "\"";
+                    if (t == want) { return ""; }
+                    return "${number} written as " + t;
+                }
+                case Err(error: e): { return "${number} not written"; }
+            };
+        }
+        case None: { return "no case numbered ${number}"; }
+    };
+}
+
+// a pad's button: its name read back to its number, and its number written as its name; "" when both hold.
+fn string padButtonWrong(const ref string name, int32 number) {
+    string text = "\"" + name + "\"";
+    Result<PadButton, Owned<Error>> read = deserializeJsonBuffer::<PadButton>(src: copy text, strict: true);
+    string why = match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            if (got == number) { return ""; }
+            return "read as ${got}";
+        }
+        case Err(error: e): e.message();
+    };
+    return why;
+}
+
+fn string padButtonWritten(const ref string name, int32 number) {
+    Optional<PadButton> c = try cast<PadButton>(cast<uint8>(number));
+    match (c) {
+        case Some(value: v): {
+            Result<string, Owned<Error>> r = serializeJsonBuffer(v: v);
+            match (r) {
+                case Ok(value: t): {
+                    string want = "\"" + name + "\"";
+                    if (t == want) { return ""; }
+                    return "${number} written as " + t;
+                }
+                case Err(error: e): { return "${number} not written"; }
+            };
+        }
+        case None: { return "no case numbered ${number}"; }
+    };
+}
+
+// a pad's axis: its name read back to its number, and its number written as its name; "" when both hold.
+fn string padAxisWrong(const ref string name, int32 number) {
+    string text = "\"" + name + "\"";
+    Result<PadAxis, Owned<Error>> read = deserializeJsonBuffer::<PadAxis>(src: copy text, strict: true);
+    string why = match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            if (got == number) { return ""; }
+            return "read as ${got}";
+        }
+        case Err(error: e): e.message();
+    };
+    return why;
+}
+
+fn string padAxisWritten(const ref string name, int32 number) {
+    Optional<PadAxis> c = try cast<PadAxis>(cast<uint8>(number));
+    match (c) {
+        case Some(value: v): {
+            Result<string, Owned<Error>> r = serializeJsonBuffer(v: v);
+            match (r) {
+                case Ok(value: t): {
+                    string want = "\"" + name + "\"";
+                    if (t == want) { return ""; }
+                    return "${number} written as " + t;
+                }
+                case Err(error: e): { return "${number} not written"; }
+            };
+        }
+        case None: { return "no case numbered ${number}"; }
+    };
+}
+
+// a pointer's button: its name read back to its number, and its number written as its name; "" when both hold.
+fn string pointerButtonWrong(const ref string name, int32 number) {
+    string text = "\"" + name + "\"";
+    Result<PointerButton, Owned<Error>> read = deserializeJsonBuffer::<PointerButton>(src: copy text, strict: true);
+    string why = match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            if (got == number) { return ""; }
+            return "read as ${got}";
+        }
+        case Err(error: e): e.message();
+    };
+    return why;
+}
+
+fn string pointerButtonWritten(const ref string name, int32 number) {
+    Optional<PointerButton> c = try cast<PointerButton>(cast<uint8>(number));
+    match (c) {
+        case Some(value: v): {
+            Result<string, Owned<Error>> r = serializeJsonBuffer(v: v);
+            match (r) {
+                case Ok(value: t): {
+                    string want = "\"" + name + "\"";
+                    if (t == want) { return ""; }
+                    return "${number} written as " + t;
+                }
+                case Err(error: e): { return "${number} not written"; }
+            };
+        }
+        case None: { return "no case numbered ${number}"; }
+    };
+}
+
+// Every Key by name: 120 names.
+fn void keyNames(ref Tally t) {
+    string wrong = "";
+    int32 checked = 0;
+    string rUnknown = keyWrong(name: "Unknown", number: 0);
+    if (!rUnknown.isEmpty()) { wrong = wrong + " Unknown: " + rUnknown + ";"; }
+    string wUnknown = keyWritten(name: "Unknown", number: 0);
+    if (!wUnknown.isEmpty()) { wrong = wrong + " Unknown: " + wUnknown + ";"; }
+    checked = checked + 1;
+    string rKeyA = keyWrong(name: "KeyA", number: 4);
+    if (!rKeyA.isEmpty()) { wrong = wrong + " KeyA: " + rKeyA + ";"; }
+    string wKeyA = keyWritten(name: "KeyA", number: 4);
+    if (!wKeyA.isEmpty()) { wrong = wrong + " KeyA: " + wKeyA + ";"; }
+    checked = checked + 1;
+    string rKeyB = keyWrong(name: "KeyB", number: 5);
+    if (!rKeyB.isEmpty()) { wrong = wrong + " KeyB: " + rKeyB + ";"; }
+    string wKeyB = keyWritten(name: "KeyB", number: 5);
+    if (!wKeyB.isEmpty()) { wrong = wrong + " KeyB: " + wKeyB + ";"; }
+    checked = checked + 1;
+    string rKeyC = keyWrong(name: "KeyC", number: 6);
+    if (!rKeyC.isEmpty()) { wrong = wrong + " KeyC: " + rKeyC + ";"; }
+    string wKeyC = keyWritten(name: "KeyC", number: 6);
+    if (!wKeyC.isEmpty()) { wrong = wrong + " KeyC: " + wKeyC + ";"; }
+    checked = checked + 1;
+    string rKeyD = keyWrong(name: "KeyD", number: 7);
+    if (!rKeyD.isEmpty()) { wrong = wrong + " KeyD: " + rKeyD + ";"; }
+    string wKeyD = keyWritten(name: "KeyD", number: 7);
+    if (!wKeyD.isEmpty()) { wrong = wrong + " KeyD: " + wKeyD + ";"; }
+    checked = checked + 1;
+    string rKeyE = keyWrong(name: "KeyE", number: 8);
+    if (!rKeyE.isEmpty()) { wrong = wrong + " KeyE: " + rKeyE + ";"; }
+    string wKeyE = keyWritten(name: "KeyE", number: 8);
+    if (!wKeyE.isEmpty()) { wrong = wrong + " KeyE: " + wKeyE + ";"; }
+    checked = checked + 1;
+    string rKeyF = keyWrong(name: "KeyF", number: 9);
+    if (!rKeyF.isEmpty()) { wrong = wrong + " KeyF: " + rKeyF + ";"; }
+    string wKeyF = keyWritten(name: "KeyF", number: 9);
+    if (!wKeyF.isEmpty()) { wrong = wrong + " KeyF: " + wKeyF + ";"; }
+    checked = checked + 1;
+    string rKeyG = keyWrong(name: "KeyG", number: 10);
+    if (!rKeyG.isEmpty()) { wrong = wrong + " KeyG: " + rKeyG + ";"; }
+    string wKeyG = keyWritten(name: "KeyG", number: 10);
+    if (!wKeyG.isEmpty()) { wrong = wrong + " KeyG: " + wKeyG + ";"; }
+    checked = checked + 1;
+    string rKeyH = keyWrong(name: "KeyH", number: 11);
+    if (!rKeyH.isEmpty()) { wrong = wrong + " KeyH: " + rKeyH + ";"; }
+    string wKeyH = keyWritten(name: "KeyH", number: 11);
+    if (!wKeyH.isEmpty()) { wrong = wrong + " KeyH: " + wKeyH + ";"; }
+    checked = checked + 1;
+    string rKeyI = keyWrong(name: "KeyI", number: 12);
+    if (!rKeyI.isEmpty()) { wrong = wrong + " KeyI: " + rKeyI + ";"; }
+    string wKeyI = keyWritten(name: "KeyI", number: 12);
+    if (!wKeyI.isEmpty()) { wrong = wrong + " KeyI: " + wKeyI + ";"; }
+    checked = checked + 1;
+    string rKeyJ = keyWrong(name: "KeyJ", number: 13);
+    if (!rKeyJ.isEmpty()) { wrong = wrong + " KeyJ: " + rKeyJ + ";"; }
+    string wKeyJ = keyWritten(name: "KeyJ", number: 13);
+    if (!wKeyJ.isEmpty()) { wrong = wrong + " KeyJ: " + wKeyJ + ";"; }
+    checked = checked + 1;
+    string rKeyK = keyWrong(name: "KeyK", number: 14);
+    if (!rKeyK.isEmpty()) { wrong = wrong + " KeyK: " + rKeyK + ";"; }
+    string wKeyK = keyWritten(name: "KeyK", number: 14);
+    if (!wKeyK.isEmpty()) { wrong = wrong + " KeyK: " + wKeyK + ";"; }
+    checked = checked + 1;
+    string rKeyL = keyWrong(name: "KeyL", number: 15);
+    if (!rKeyL.isEmpty()) { wrong = wrong + " KeyL: " + rKeyL + ";"; }
+    string wKeyL = keyWritten(name: "KeyL", number: 15);
+    if (!wKeyL.isEmpty()) { wrong = wrong + " KeyL: " + wKeyL + ";"; }
+    checked = checked + 1;
+    string rKeyM = keyWrong(name: "KeyM", number: 16);
+    if (!rKeyM.isEmpty()) { wrong = wrong + " KeyM: " + rKeyM + ";"; }
+    string wKeyM = keyWritten(name: "KeyM", number: 16);
+    if (!wKeyM.isEmpty()) { wrong = wrong + " KeyM: " + wKeyM + ";"; }
+    checked = checked + 1;
+    string rKeyN = keyWrong(name: "KeyN", number: 17);
+    if (!rKeyN.isEmpty()) { wrong = wrong + " KeyN: " + rKeyN + ";"; }
+    string wKeyN = keyWritten(name: "KeyN", number: 17);
+    if (!wKeyN.isEmpty()) { wrong = wrong + " KeyN: " + wKeyN + ";"; }
+    checked = checked + 1;
+    string rKeyO = keyWrong(name: "KeyO", number: 18);
+    if (!rKeyO.isEmpty()) { wrong = wrong + " KeyO: " + rKeyO + ";"; }
+    string wKeyO = keyWritten(name: "KeyO", number: 18);
+    if (!wKeyO.isEmpty()) { wrong = wrong + " KeyO: " + wKeyO + ";"; }
+    checked = checked + 1;
+    string rKeyP = keyWrong(name: "KeyP", number: 19);
+    if (!rKeyP.isEmpty()) { wrong = wrong + " KeyP: " + rKeyP + ";"; }
+    string wKeyP = keyWritten(name: "KeyP", number: 19);
+    if (!wKeyP.isEmpty()) { wrong = wrong + " KeyP: " + wKeyP + ";"; }
+    checked = checked + 1;
+    string rKeyQ = keyWrong(name: "KeyQ", number: 20);
+    if (!rKeyQ.isEmpty()) { wrong = wrong + " KeyQ: " + rKeyQ + ";"; }
+    string wKeyQ = keyWritten(name: "KeyQ", number: 20);
+    if (!wKeyQ.isEmpty()) { wrong = wrong + " KeyQ: " + wKeyQ + ";"; }
+    checked = checked + 1;
+    string rKeyR = keyWrong(name: "KeyR", number: 21);
+    if (!rKeyR.isEmpty()) { wrong = wrong + " KeyR: " + rKeyR + ";"; }
+    string wKeyR = keyWritten(name: "KeyR", number: 21);
+    if (!wKeyR.isEmpty()) { wrong = wrong + " KeyR: " + wKeyR + ";"; }
+    checked = checked + 1;
+    string rKeyS = keyWrong(name: "KeyS", number: 22);
+    if (!rKeyS.isEmpty()) { wrong = wrong + " KeyS: " + rKeyS + ";"; }
+    string wKeyS = keyWritten(name: "KeyS", number: 22);
+    if (!wKeyS.isEmpty()) { wrong = wrong + " KeyS: " + wKeyS + ";"; }
+    checked = checked + 1;
+    string rKeyT = keyWrong(name: "KeyT", number: 23);
+    if (!rKeyT.isEmpty()) { wrong = wrong + " KeyT: " + rKeyT + ";"; }
+    string wKeyT = keyWritten(name: "KeyT", number: 23);
+    if (!wKeyT.isEmpty()) { wrong = wrong + " KeyT: " + wKeyT + ";"; }
+    checked = checked + 1;
+    string rKeyU = keyWrong(name: "KeyU", number: 24);
+    if (!rKeyU.isEmpty()) { wrong = wrong + " KeyU: " + rKeyU + ";"; }
+    string wKeyU = keyWritten(name: "KeyU", number: 24);
+    if (!wKeyU.isEmpty()) { wrong = wrong + " KeyU: " + wKeyU + ";"; }
+    checked = checked + 1;
+    string rKeyV = keyWrong(name: "KeyV", number: 25);
+    if (!rKeyV.isEmpty()) { wrong = wrong + " KeyV: " + rKeyV + ";"; }
+    string wKeyV = keyWritten(name: "KeyV", number: 25);
+    if (!wKeyV.isEmpty()) { wrong = wrong + " KeyV: " + wKeyV + ";"; }
+    checked = checked + 1;
+    string rKeyW = keyWrong(name: "KeyW", number: 26);
+    if (!rKeyW.isEmpty()) { wrong = wrong + " KeyW: " + rKeyW + ";"; }
+    string wKeyW = keyWritten(name: "KeyW", number: 26);
+    if (!wKeyW.isEmpty()) { wrong = wrong + " KeyW: " + wKeyW + ";"; }
+    checked = checked + 1;
+    string rKeyX = keyWrong(name: "KeyX", number: 27);
+    if (!rKeyX.isEmpty()) { wrong = wrong + " KeyX: " + rKeyX + ";"; }
+    string wKeyX = keyWritten(name: "KeyX", number: 27);
+    if (!wKeyX.isEmpty()) { wrong = wrong + " KeyX: " + wKeyX + ";"; }
+    checked = checked + 1;
+    string rKeyY = keyWrong(name: "KeyY", number: 28);
+    if (!rKeyY.isEmpty()) { wrong = wrong + " KeyY: " + rKeyY + ";"; }
+    string wKeyY = keyWritten(name: "KeyY", number: 28);
+    if (!wKeyY.isEmpty()) { wrong = wrong + " KeyY: " + wKeyY + ";"; }
+    checked = checked + 1;
+    string rKeyZ = keyWrong(name: "KeyZ", number: 29);
+    if (!rKeyZ.isEmpty()) { wrong = wrong + " KeyZ: " + rKeyZ + ";"; }
+    string wKeyZ = keyWritten(name: "KeyZ", number: 29);
+    if (!wKeyZ.isEmpty()) { wrong = wrong + " KeyZ: " + wKeyZ + ";"; }
+    checked = checked + 1;
+    string rDigit1 = keyWrong(name: "Digit1", number: 30);
+    if (!rDigit1.isEmpty()) { wrong = wrong + " Digit1: " + rDigit1 + ";"; }
+    string wDigit1 = keyWritten(name: "Digit1", number: 30);
+    if (!wDigit1.isEmpty()) { wrong = wrong + " Digit1: " + wDigit1 + ";"; }
+    checked = checked + 1;
+    string rDigit2 = keyWrong(name: "Digit2", number: 31);
+    if (!rDigit2.isEmpty()) { wrong = wrong + " Digit2: " + rDigit2 + ";"; }
+    string wDigit2 = keyWritten(name: "Digit2", number: 31);
+    if (!wDigit2.isEmpty()) { wrong = wrong + " Digit2: " + wDigit2 + ";"; }
+    checked = checked + 1;
+    string rDigit3 = keyWrong(name: "Digit3", number: 32);
+    if (!rDigit3.isEmpty()) { wrong = wrong + " Digit3: " + rDigit3 + ";"; }
+    string wDigit3 = keyWritten(name: "Digit3", number: 32);
+    if (!wDigit3.isEmpty()) { wrong = wrong + " Digit3: " + wDigit3 + ";"; }
+    checked = checked + 1;
+    string rDigit4 = keyWrong(name: "Digit4", number: 33);
+    if (!rDigit4.isEmpty()) { wrong = wrong + " Digit4: " + rDigit4 + ";"; }
+    string wDigit4 = keyWritten(name: "Digit4", number: 33);
+    if (!wDigit4.isEmpty()) { wrong = wrong + " Digit4: " + wDigit4 + ";"; }
+    checked = checked + 1;
+    string rDigit5 = keyWrong(name: "Digit5", number: 34);
+    if (!rDigit5.isEmpty()) { wrong = wrong + " Digit5: " + rDigit5 + ";"; }
+    string wDigit5 = keyWritten(name: "Digit5", number: 34);
+    if (!wDigit5.isEmpty()) { wrong = wrong + " Digit5: " + wDigit5 + ";"; }
+    checked = checked + 1;
+    string rDigit6 = keyWrong(name: "Digit6", number: 35);
+    if (!rDigit6.isEmpty()) { wrong = wrong + " Digit6: " + rDigit6 + ";"; }
+    string wDigit6 = keyWritten(name: "Digit6", number: 35);
+    if (!wDigit6.isEmpty()) { wrong = wrong + " Digit6: " + wDigit6 + ";"; }
+    checked = checked + 1;
+    string rDigit7 = keyWrong(name: "Digit7", number: 36);
+    if (!rDigit7.isEmpty()) { wrong = wrong + " Digit7: " + rDigit7 + ";"; }
+    string wDigit7 = keyWritten(name: "Digit7", number: 36);
+    if (!wDigit7.isEmpty()) { wrong = wrong + " Digit7: " + wDigit7 + ";"; }
+    checked = checked + 1;
+    string rDigit8 = keyWrong(name: "Digit8", number: 37);
+    if (!rDigit8.isEmpty()) { wrong = wrong + " Digit8: " + rDigit8 + ";"; }
+    string wDigit8 = keyWritten(name: "Digit8", number: 37);
+    if (!wDigit8.isEmpty()) { wrong = wrong + " Digit8: " + wDigit8 + ";"; }
+    checked = checked + 1;
+    string rDigit9 = keyWrong(name: "Digit9", number: 38);
+    if (!rDigit9.isEmpty()) { wrong = wrong + " Digit9: " + rDigit9 + ";"; }
+    string wDigit9 = keyWritten(name: "Digit9", number: 38);
+    if (!wDigit9.isEmpty()) { wrong = wrong + " Digit9: " + wDigit9 + ";"; }
+    checked = checked + 1;
+    string rDigit0 = keyWrong(name: "Digit0", number: 39);
+    if (!rDigit0.isEmpty()) { wrong = wrong + " Digit0: " + rDigit0 + ";"; }
+    string wDigit0 = keyWritten(name: "Digit0", number: 39);
+    if (!wDigit0.isEmpty()) { wrong = wrong + " Digit0: " + wDigit0 + ";"; }
+    checked = checked + 1;
+    string rEnter = keyWrong(name: "Enter", number: 40);
+    if (!rEnter.isEmpty()) { wrong = wrong + " Enter: " + rEnter + ";"; }
+    string wEnter = keyWritten(name: "Enter", number: 40);
+    if (!wEnter.isEmpty()) { wrong = wrong + " Enter: " + wEnter + ";"; }
+    checked = checked + 1;
+    string rEscape = keyWrong(name: "Escape", number: 41);
+    if (!rEscape.isEmpty()) { wrong = wrong + " Escape: " + rEscape + ";"; }
+    string wEscape = keyWritten(name: "Escape", number: 41);
+    if (!wEscape.isEmpty()) { wrong = wrong + " Escape: " + wEscape + ";"; }
+    checked = checked + 1;
+    string rBackspace = keyWrong(name: "Backspace", number: 42);
+    if (!rBackspace.isEmpty()) { wrong = wrong + " Backspace: " + rBackspace + ";"; }
+    string wBackspace = keyWritten(name: "Backspace", number: 42);
+    if (!wBackspace.isEmpty()) { wrong = wrong + " Backspace: " + wBackspace + ";"; }
+    checked = checked + 1;
+    string rTab = keyWrong(name: "Tab", number: 43);
+    if (!rTab.isEmpty()) { wrong = wrong + " Tab: " + rTab + ";"; }
+    string wTab = keyWritten(name: "Tab", number: 43);
+    if (!wTab.isEmpty()) { wrong = wrong + " Tab: " + wTab + ";"; }
+    checked = checked + 1;
+    string rSpace = keyWrong(name: "Space", number: 44);
+    if (!rSpace.isEmpty()) { wrong = wrong + " Space: " + rSpace + ";"; }
+    string wSpace = keyWritten(name: "Space", number: 44);
+    if (!wSpace.isEmpty()) { wrong = wrong + " Space: " + wSpace + ";"; }
+    checked = checked + 1;
+    string rMinus = keyWrong(name: "Minus", number: 45);
+    if (!rMinus.isEmpty()) { wrong = wrong + " Minus: " + rMinus + ";"; }
+    string wMinus = keyWritten(name: "Minus", number: 45);
+    if (!wMinus.isEmpty()) { wrong = wrong + " Minus: " + wMinus + ";"; }
+    checked = checked + 1;
+    string rEqual = keyWrong(name: "Equal", number: 46);
+    if (!rEqual.isEmpty()) { wrong = wrong + " Equal: " + rEqual + ";"; }
+    string wEqual = keyWritten(name: "Equal", number: 46);
+    if (!wEqual.isEmpty()) { wrong = wrong + " Equal: " + wEqual + ";"; }
+    checked = checked + 1;
+    string rBracketLeft = keyWrong(name: "BracketLeft", number: 47);
+    if (!rBracketLeft.isEmpty()) { wrong = wrong + " BracketLeft: " + rBracketLeft + ";"; }
+    string wBracketLeft = keyWritten(name: "BracketLeft", number: 47);
+    if (!wBracketLeft.isEmpty()) { wrong = wrong + " BracketLeft: " + wBracketLeft + ";"; }
+    checked = checked + 1;
+    string rBracketRight = keyWrong(name: "BracketRight", number: 48);
+    if (!rBracketRight.isEmpty()) { wrong = wrong + " BracketRight: " + rBracketRight + ";"; }
+    string wBracketRight = keyWritten(name: "BracketRight", number: 48);
+    if (!wBracketRight.isEmpty()) { wrong = wrong + " BracketRight: " + wBracketRight + ";"; }
+    checked = checked + 1;
+    string rBackslash = keyWrong(name: "Backslash", number: 49);
+    if (!rBackslash.isEmpty()) { wrong = wrong + " Backslash: " + rBackslash + ";"; }
+    string wBackslash = keyWritten(name: "Backslash", number: 49);
+    if (!wBackslash.isEmpty()) { wrong = wrong + " Backslash: " + wBackslash + ";"; }
+    checked = checked + 1;
+    string rIntlHash = keyWrong(name: "IntlHash", number: 50);
+    if (!rIntlHash.isEmpty()) { wrong = wrong + " IntlHash: " + rIntlHash + ";"; }
+    string wIntlHash = keyWritten(name: "IntlHash", number: 50);
+    if (!wIntlHash.isEmpty()) { wrong = wrong + " IntlHash: " + wIntlHash + ";"; }
+    checked = checked + 1;
+    string rSemicolon = keyWrong(name: "Semicolon", number: 51);
+    if (!rSemicolon.isEmpty()) { wrong = wrong + " Semicolon: " + rSemicolon + ";"; }
+    string wSemicolon = keyWritten(name: "Semicolon", number: 51);
+    if (!wSemicolon.isEmpty()) { wrong = wrong + " Semicolon: " + wSemicolon + ";"; }
+    checked = checked + 1;
+    string rQuote = keyWrong(name: "Quote", number: 52);
+    if (!rQuote.isEmpty()) { wrong = wrong + " Quote: " + rQuote + ";"; }
+    string wQuote = keyWritten(name: "Quote", number: 52);
+    if (!wQuote.isEmpty()) { wrong = wrong + " Quote: " + wQuote + ";"; }
+    checked = checked + 1;
+    string rBackquote = keyWrong(name: "Backquote", number: 53);
+    if (!rBackquote.isEmpty()) { wrong = wrong + " Backquote: " + rBackquote + ";"; }
+    string wBackquote = keyWritten(name: "Backquote", number: 53);
+    if (!wBackquote.isEmpty()) { wrong = wrong + " Backquote: " + wBackquote + ";"; }
+    checked = checked + 1;
+    string rComma = keyWrong(name: "Comma", number: 54);
+    if (!rComma.isEmpty()) { wrong = wrong + " Comma: " + rComma + ";"; }
+    string wComma = keyWritten(name: "Comma", number: 54);
+    if (!wComma.isEmpty()) { wrong = wrong + " Comma: " + wComma + ";"; }
+    checked = checked + 1;
+    string rPeriod = keyWrong(name: "Period", number: 55);
+    if (!rPeriod.isEmpty()) { wrong = wrong + " Period: " + rPeriod + ";"; }
+    string wPeriod = keyWritten(name: "Period", number: 55);
+    if (!wPeriod.isEmpty()) { wrong = wrong + " Period: " + wPeriod + ";"; }
+    checked = checked + 1;
+    string rSlash = keyWrong(name: "Slash", number: 56);
+    if (!rSlash.isEmpty()) { wrong = wrong + " Slash: " + rSlash + ";"; }
+    string wSlash = keyWritten(name: "Slash", number: 56);
+    if (!wSlash.isEmpty()) { wrong = wrong + " Slash: " + wSlash + ";"; }
+    checked = checked + 1;
+    string rCapsLock = keyWrong(name: "CapsLock", number: 57);
+    if (!rCapsLock.isEmpty()) { wrong = wrong + " CapsLock: " + rCapsLock + ";"; }
+    string wCapsLock = keyWritten(name: "CapsLock", number: 57);
+    if (!wCapsLock.isEmpty()) { wrong = wrong + " CapsLock: " + wCapsLock + ";"; }
+    checked = checked + 1;
+    string rF1 = keyWrong(name: "F1", number: 58);
+    if (!rF1.isEmpty()) { wrong = wrong + " F1: " + rF1 + ";"; }
+    string wF1 = keyWritten(name: "F1", number: 58);
+    if (!wF1.isEmpty()) { wrong = wrong + " F1: " + wF1 + ";"; }
+    checked = checked + 1;
+    string rF2 = keyWrong(name: "F2", number: 59);
+    if (!rF2.isEmpty()) { wrong = wrong + " F2: " + rF2 + ";"; }
+    string wF2 = keyWritten(name: "F2", number: 59);
+    if (!wF2.isEmpty()) { wrong = wrong + " F2: " + wF2 + ";"; }
+    checked = checked + 1;
+    string rF3 = keyWrong(name: "F3", number: 60);
+    if (!rF3.isEmpty()) { wrong = wrong + " F3: " + rF3 + ";"; }
+    string wF3 = keyWritten(name: "F3", number: 60);
+    if (!wF3.isEmpty()) { wrong = wrong + " F3: " + wF3 + ";"; }
+    checked = checked + 1;
+    string rF4 = keyWrong(name: "F4", number: 61);
+    if (!rF4.isEmpty()) { wrong = wrong + " F4: " + rF4 + ";"; }
+    string wF4 = keyWritten(name: "F4", number: 61);
+    if (!wF4.isEmpty()) { wrong = wrong + " F4: " + wF4 + ";"; }
+    checked = checked + 1;
+    string rF5 = keyWrong(name: "F5", number: 62);
+    if (!rF5.isEmpty()) { wrong = wrong + " F5: " + rF5 + ";"; }
+    string wF5 = keyWritten(name: "F5", number: 62);
+    if (!wF5.isEmpty()) { wrong = wrong + " F5: " + wF5 + ";"; }
+    checked = checked + 1;
+    string rF6 = keyWrong(name: "F6", number: 63);
+    if (!rF6.isEmpty()) { wrong = wrong + " F6: " + rF6 + ";"; }
+    string wF6 = keyWritten(name: "F6", number: 63);
+    if (!wF6.isEmpty()) { wrong = wrong + " F6: " + wF6 + ";"; }
+    checked = checked + 1;
+    string rF7 = keyWrong(name: "F7", number: 64);
+    if (!rF7.isEmpty()) { wrong = wrong + " F7: " + rF7 + ";"; }
+    string wF7 = keyWritten(name: "F7", number: 64);
+    if (!wF7.isEmpty()) { wrong = wrong + " F7: " + wF7 + ";"; }
+    checked = checked + 1;
+    string rF8 = keyWrong(name: "F8", number: 65);
+    if (!rF8.isEmpty()) { wrong = wrong + " F8: " + rF8 + ";"; }
+    string wF8 = keyWritten(name: "F8", number: 65);
+    if (!wF8.isEmpty()) { wrong = wrong + " F8: " + wF8 + ";"; }
+    checked = checked + 1;
+    string rF9 = keyWrong(name: "F9", number: 66);
+    if (!rF9.isEmpty()) { wrong = wrong + " F9: " + rF9 + ";"; }
+    string wF9 = keyWritten(name: "F9", number: 66);
+    if (!wF9.isEmpty()) { wrong = wrong + " F9: " + wF9 + ";"; }
+    checked = checked + 1;
+    string rF10 = keyWrong(name: "F10", number: 67);
+    if (!rF10.isEmpty()) { wrong = wrong + " F10: " + rF10 + ";"; }
+    string wF10 = keyWritten(name: "F10", number: 67);
+    if (!wF10.isEmpty()) { wrong = wrong + " F10: " + wF10 + ";"; }
+    checked = checked + 1;
+    string rF11 = keyWrong(name: "F11", number: 68);
+    if (!rF11.isEmpty()) { wrong = wrong + " F11: " + rF11 + ";"; }
+    string wF11 = keyWritten(name: "F11", number: 68);
+    if (!wF11.isEmpty()) { wrong = wrong + " F11: " + wF11 + ";"; }
+    checked = checked + 1;
+    string rF12 = keyWrong(name: "F12", number: 69);
+    if (!rF12.isEmpty()) { wrong = wrong + " F12: " + rF12 + ";"; }
+    string wF12 = keyWritten(name: "F12", number: 69);
+    if (!wF12.isEmpty()) { wrong = wrong + " F12: " + wF12 + ";"; }
+    checked = checked + 1;
+    string rPrintScreen = keyWrong(name: "PrintScreen", number: 70);
+    if (!rPrintScreen.isEmpty()) { wrong = wrong + " PrintScreen: " + rPrintScreen + ";"; }
+    string wPrintScreen = keyWritten(name: "PrintScreen", number: 70);
+    if (!wPrintScreen.isEmpty()) { wrong = wrong + " PrintScreen: " + wPrintScreen + ";"; }
+    checked = checked + 1;
+    string rScrollLock = keyWrong(name: "ScrollLock", number: 71);
+    if (!rScrollLock.isEmpty()) { wrong = wrong + " ScrollLock: " + rScrollLock + ";"; }
+    string wScrollLock = keyWritten(name: "ScrollLock", number: 71);
+    if (!wScrollLock.isEmpty()) { wrong = wrong + " ScrollLock: " + wScrollLock + ";"; }
+    checked = checked + 1;
+    string rPause = keyWrong(name: "Pause", number: 72);
+    if (!rPause.isEmpty()) { wrong = wrong + " Pause: " + rPause + ";"; }
+    string wPause = keyWritten(name: "Pause", number: 72);
+    if (!wPause.isEmpty()) { wrong = wrong + " Pause: " + wPause + ";"; }
+    checked = checked + 1;
+    string rInsert = keyWrong(name: "Insert", number: 73);
+    if (!rInsert.isEmpty()) { wrong = wrong + " Insert: " + rInsert + ";"; }
+    string wInsert = keyWritten(name: "Insert", number: 73);
+    if (!wInsert.isEmpty()) { wrong = wrong + " Insert: " + wInsert + ";"; }
+    checked = checked + 1;
+    string rHome = keyWrong(name: "Home", number: 74);
+    if (!rHome.isEmpty()) { wrong = wrong + " Home: " + rHome + ";"; }
+    string wHome = keyWritten(name: "Home", number: 74);
+    if (!wHome.isEmpty()) { wrong = wrong + " Home: " + wHome + ";"; }
+    checked = checked + 1;
+    string rPageUp = keyWrong(name: "PageUp", number: 75);
+    if (!rPageUp.isEmpty()) { wrong = wrong + " PageUp: " + rPageUp + ";"; }
+    string wPageUp = keyWritten(name: "PageUp", number: 75);
+    if (!wPageUp.isEmpty()) { wrong = wrong + " PageUp: " + wPageUp + ";"; }
+    checked = checked + 1;
+    string rDelete = keyWrong(name: "Delete", number: 76);
+    if (!rDelete.isEmpty()) { wrong = wrong + " Delete: " + rDelete + ";"; }
+    string wDelete = keyWritten(name: "Delete", number: 76);
+    if (!wDelete.isEmpty()) { wrong = wrong + " Delete: " + wDelete + ";"; }
+    checked = checked + 1;
+    string rEnd = keyWrong(name: "End", number: 77);
+    if (!rEnd.isEmpty()) { wrong = wrong + " End: " + rEnd + ";"; }
+    string wEnd = keyWritten(name: "End", number: 77);
+    if (!wEnd.isEmpty()) { wrong = wrong + " End: " + wEnd + ";"; }
+    checked = checked + 1;
+    string rPageDown = keyWrong(name: "PageDown", number: 78);
+    if (!rPageDown.isEmpty()) { wrong = wrong + " PageDown: " + rPageDown + ";"; }
+    string wPageDown = keyWritten(name: "PageDown", number: 78);
+    if (!wPageDown.isEmpty()) { wrong = wrong + " PageDown: " + wPageDown + ";"; }
+    checked = checked + 1;
+    string rArrowRight = keyWrong(name: "ArrowRight", number: 79);
+    if (!rArrowRight.isEmpty()) { wrong = wrong + " ArrowRight: " + rArrowRight + ";"; }
+    string wArrowRight = keyWritten(name: "ArrowRight", number: 79);
+    if (!wArrowRight.isEmpty()) { wrong = wrong + " ArrowRight: " + wArrowRight + ";"; }
+    checked = checked + 1;
+    string rArrowLeft = keyWrong(name: "ArrowLeft", number: 80);
+    if (!rArrowLeft.isEmpty()) { wrong = wrong + " ArrowLeft: " + rArrowLeft + ";"; }
+    string wArrowLeft = keyWritten(name: "ArrowLeft", number: 80);
+    if (!wArrowLeft.isEmpty()) { wrong = wrong + " ArrowLeft: " + wArrowLeft + ";"; }
+    checked = checked + 1;
+    string rArrowDown = keyWrong(name: "ArrowDown", number: 81);
+    if (!rArrowDown.isEmpty()) { wrong = wrong + " ArrowDown: " + rArrowDown + ";"; }
+    string wArrowDown = keyWritten(name: "ArrowDown", number: 81);
+    if (!wArrowDown.isEmpty()) { wrong = wrong + " ArrowDown: " + wArrowDown + ";"; }
+    checked = checked + 1;
+    string rArrowUp = keyWrong(name: "ArrowUp", number: 82);
+    if (!rArrowUp.isEmpty()) { wrong = wrong + " ArrowUp: " + rArrowUp + ";"; }
+    string wArrowUp = keyWritten(name: "ArrowUp", number: 82);
+    if (!wArrowUp.isEmpty()) { wrong = wrong + " ArrowUp: " + wArrowUp + ";"; }
+    checked = checked + 1;
+    string rNumLock = keyWrong(name: "NumLock", number: 83);
+    if (!rNumLock.isEmpty()) { wrong = wrong + " NumLock: " + rNumLock + ";"; }
+    string wNumLock = keyWritten(name: "NumLock", number: 83);
+    if (!wNumLock.isEmpty()) { wrong = wrong + " NumLock: " + wNumLock + ";"; }
+    checked = checked + 1;
+    string rNumpadDivide = keyWrong(name: "NumpadDivide", number: 84);
+    if (!rNumpadDivide.isEmpty()) { wrong = wrong + " NumpadDivide: " + rNumpadDivide + ";"; }
+    string wNumpadDivide = keyWritten(name: "NumpadDivide", number: 84);
+    if (!wNumpadDivide.isEmpty()) { wrong = wrong + " NumpadDivide: " + wNumpadDivide + ";"; }
+    checked = checked + 1;
+    string rNumpadMultiply = keyWrong(name: "NumpadMultiply", number: 85);
+    if (!rNumpadMultiply.isEmpty()) { wrong = wrong + " NumpadMultiply: " + rNumpadMultiply + ";"; }
+    string wNumpadMultiply = keyWritten(name: "NumpadMultiply", number: 85);
+    if (!wNumpadMultiply.isEmpty()) { wrong = wrong + " NumpadMultiply: " + wNumpadMultiply + ";"; }
+    checked = checked + 1;
+    string rNumpadSubtract = keyWrong(name: "NumpadSubtract", number: 86);
+    if (!rNumpadSubtract.isEmpty()) { wrong = wrong + " NumpadSubtract: " + rNumpadSubtract + ";"; }
+    string wNumpadSubtract = keyWritten(name: "NumpadSubtract", number: 86);
+    if (!wNumpadSubtract.isEmpty()) { wrong = wrong + " NumpadSubtract: " + wNumpadSubtract + ";"; }
+    checked = checked + 1;
+    string rNumpadAdd = keyWrong(name: "NumpadAdd", number: 87);
+    if (!rNumpadAdd.isEmpty()) { wrong = wrong + " NumpadAdd: " + rNumpadAdd + ";"; }
+    string wNumpadAdd = keyWritten(name: "NumpadAdd", number: 87);
+    if (!wNumpadAdd.isEmpty()) { wrong = wrong + " NumpadAdd: " + wNumpadAdd + ";"; }
+    checked = checked + 1;
+    string rNumpadEnter = keyWrong(name: "NumpadEnter", number: 88);
+    if (!rNumpadEnter.isEmpty()) { wrong = wrong + " NumpadEnter: " + rNumpadEnter + ";"; }
+    string wNumpadEnter = keyWritten(name: "NumpadEnter", number: 88);
+    if (!wNumpadEnter.isEmpty()) { wrong = wrong + " NumpadEnter: " + wNumpadEnter + ";"; }
+    checked = checked + 1;
+    string rNumpad1 = keyWrong(name: "Numpad1", number: 89);
+    if (!rNumpad1.isEmpty()) { wrong = wrong + " Numpad1: " + rNumpad1 + ";"; }
+    string wNumpad1 = keyWritten(name: "Numpad1", number: 89);
+    if (!wNumpad1.isEmpty()) { wrong = wrong + " Numpad1: " + wNumpad1 + ";"; }
+    checked = checked + 1;
+    string rNumpad2 = keyWrong(name: "Numpad2", number: 90);
+    if (!rNumpad2.isEmpty()) { wrong = wrong + " Numpad2: " + rNumpad2 + ";"; }
+    string wNumpad2 = keyWritten(name: "Numpad2", number: 90);
+    if (!wNumpad2.isEmpty()) { wrong = wrong + " Numpad2: " + wNumpad2 + ";"; }
+    checked = checked + 1;
+    string rNumpad3 = keyWrong(name: "Numpad3", number: 91);
+    if (!rNumpad3.isEmpty()) { wrong = wrong + " Numpad3: " + rNumpad3 + ";"; }
+    string wNumpad3 = keyWritten(name: "Numpad3", number: 91);
+    if (!wNumpad3.isEmpty()) { wrong = wrong + " Numpad3: " + wNumpad3 + ";"; }
+    checked = checked + 1;
+    string rNumpad4 = keyWrong(name: "Numpad4", number: 92);
+    if (!rNumpad4.isEmpty()) { wrong = wrong + " Numpad4: " + rNumpad4 + ";"; }
+    string wNumpad4 = keyWritten(name: "Numpad4", number: 92);
+    if (!wNumpad4.isEmpty()) { wrong = wrong + " Numpad4: " + wNumpad4 + ";"; }
+    checked = checked + 1;
+    string rNumpad5 = keyWrong(name: "Numpad5", number: 93);
+    if (!rNumpad5.isEmpty()) { wrong = wrong + " Numpad5: " + rNumpad5 + ";"; }
+    string wNumpad5 = keyWritten(name: "Numpad5", number: 93);
+    if (!wNumpad5.isEmpty()) { wrong = wrong + " Numpad5: " + wNumpad5 + ";"; }
+    checked = checked + 1;
+    string rNumpad6 = keyWrong(name: "Numpad6", number: 94);
+    if (!rNumpad6.isEmpty()) { wrong = wrong + " Numpad6: " + rNumpad6 + ";"; }
+    string wNumpad6 = keyWritten(name: "Numpad6", number: 94);
+    if (!wNumpad6.isEmpty()) { wrong = wrong + " Numpad6: " + wNumpad6 + ";"; }
+    checked = checked + 1;
+    string rNumpad7 = keyWrong(name: "Numpad7", number: 95);
+    if (!rNumpad7.isEmpty()) { wrong = wrong + " Numpad7: " + rNumpad7 + ";"; }
+    string wNumpad7 = keyWritten(name: "Numpad7", number: 95);
+    if (!wNumpad7.isEmpty()) { wrong = wrong + " Numpad7: " + wNumpad7 + ";"; }
+    checked = checked + 1;
+    string rNumpad8 = keyWrong(name: "Numpad8", number: 96);
+    if (!rNumpad8.isEmpty()) { wrong = wrong + " Numpad8: " + rNumpad8 + ";"; }
+    string wNumpad8 = keyWritten(name: "Numpad8", number: 96);
+    if (!wNumpad8.isEmpty()) { wrong = wrong + " Numpad8: " + wNumpad8 + ";"; }
+    checked = checked + 1;
+    string rNumpad9 = keyWrong(name: "Numpad9", number: 97);
+    if (!rNumpad9.isEmpty()) { wrong = wrong + " Numpad9: " + rNumpad9 + ";"; }
+    string wNumpad9 = keyWritten(name: "Numpad9", number: 97);
+    if (!wNumpad9.isEmpty()) { wrong = wrong + " Numpad9: " + wNumpad9 + ";"; }
+    checked = checked + 1;
+    string rNumpad0 = keyWrong(name: "Numpad0", number: 98);
+    if (!rNumpad0.isEmpty()) { wrong = wrong + " Numpad0: " + rNumpad0 + ";"; }
+    string wNumpad0 = keyWritten(name: "Numpad0", number: 98);
+    if (!wNumpad0.isEmpty()) { wrong = wrong + " Numpad0: " + wNumpad0 + ";"; }
+    checked = checked + 1;
+    string rNumpadDecimal = keyWrong(name: "NumpadDecimal", number: 99);
+    if (!rNumpadDecimal.isEmpty()) { wrong = wrong + " NumpadDecimal: " + rNumpadDecimal + ";"; }
+    string wNumpadDecimal = keyWritten(name: "NumpadDecimal", number: 99);
+    if (!wNumpadDecimal.isEmpty()) { wrong = wrong + " NumpadDecimal: " + wNumpadDecimal + ";"; }
+    checked = checked + 1;
+    string rIntlBackslash = keyWrong(name: "IntlBackslash", number: 100);
+    if (!rIntlBackslash.isEmpty()) { wrong = wrong + " IntlBackslash: " + rIntlBackslash + ";"; }
+    string wIntlBackslash = keyWritten(name: "IntlBackslash", number: 100);
+    if (!wIntlBackslash.isEmpty()) { wrong = wrong + " IntlBackslash: " + wIntlBackslash + ";"; }
+    checked = checked + 1;
+    string rContextMenu = keyWrong(name: "ContextMenu", number: 101);
+    if (!rContextMenu.isEmpty()) { wrong = wrong + " ContextMenu: " + rContextMenu + ";"; }
+    string wContextMenu = keyWritten(name: "ContextMenu", number: 101);
+    if (!wContextMenu.isEmpty()) { wrong = wrong + " ContextMenu: " + wContextMenu + ";"; }
+    checked = checked + 1;
+    string rNumpadEqual = keyWrong(name: "NumpadEqual", number: 103);
+    if (!rNumpadEqual.isEmpty()) { wrong = wrong + " NumpadEqual: " + rNumpadEqual + ";"; }
+    string wNumpadEqual = keyWritten(name: "NumpadEqual", number: 103);
+    if (!wNumpadEqual.isEmpty()) { wrong = wrong + " NumpadEqual: " + wNumpadEqual + ";"; }
+    checked = checked + 1;
+    string rF13 = keyWrong(name: "F13", number: 104);
+    if (!rF13.isEmpty()) { wrong = wrong + " F13: " + rF13 + ";"; }
+    string wF13 = keyWritten(name: "F13", number: 104);
+    if (!wF13.isEmpty()) { wrong = wrong + " F13: " + wF13 + ";"; }
+    checked = checked + 1;
+    string rF14 = keyWrong(name: "F14", number: 105);
+    if (!rF14.isEmpty()) { wrong = wrong + " F14: " + rF14 + ";"; }
+    string wF14 = keyWritten(name: "F14", number: 105);
+    if (!wF14.isEmpty()) { wrong = wrong + " F14: " + wF14 + ";"; }
+    checked = checked + 1;
+    string rF15 = keyWrong(name: "F15", number: 106);
+    if (!rF15.isEmpty()) { wrong = wrong + " F15: " + rF15 + ";"; }
+    string wF15 = keyWritten(name: "F15", number: 106);
+    if (!wF15.isEmpty()) { wrong = wrong + " F15: " + wF15 + ";"; }
+    checked = checked + 1;
+    string rF16 = keyWrong(name: "F16", number: 107);
+    if (!rF16.isEmpty()) { wrong = wrong + " F16: " + rF16 + ";"; }
+    string wF16 = keyWritten(name: "F16", number: 107);
+    if (!wF16.isEmpty()) { wrong = wrong + " F16: " + wF16 + ";"; }
+    checked = checked + 1;
+    string rF17 = keyWrong(name: "F17", number: 108);
+    if (!rF17.isEmpty()) { wrong = wrong + " F17: " + rF17 + ";"; }
+    string wF17 = keyWritten(name: "F17", number: 108);
+    if (!wF17.isEmpty()) { wrong = wrong + " F17: " + wF17 + ";"; }
+    checked = checked + 1;
+    string rF18 = keyWrong(name: "F18", number: 109);
+    if (!rF18.isEmpty()) { wrong = wrong + " F18: " + rF18 + ";"; }
+    string wF18 = keyWritten(name: "F18", number: 109);
+    if (!wF18.isEmpty()) { wrong = wrong + " F18: " + wF18 + ";"; }
+    checked = checked + 1;
+    string rF19 = keyWrong(name: "F19", number: 110);
+    if (!rF19.isEmpty()) { wrong = wrong + " F19: " + rF19 + ";"; }
+    string wF19 = keyWritten(name: "F19", number: 110);
+    if (!wF19.isEmpty()) { wrong = wrong + " F19: " + wF19 + ";"; }
+    checked = checked + 1;
+    string rF20 = keyWrong(name: "F20", number: 111);
+    if (!rF20.isEmpty()) { wrong = wrong + " F20: " + rF20 + ";"; }
+    string wF20 = keyWritten(name: "F20", number: 111);
+    if (!wF20.isEmpty()) { wrong = wrong + " F20: " + wF20 + ";"; }
+    checked = checked + 1;
+    string rF21 = keyWrong(name: "F21", number: 112);
+    if (!rF21.isEmpty()) { wrong = wrong + " F21: " + rF21 + ";"; }
+    string wF21 = keyWritten(name: "F21", number: 112);
+    if (!wF21.isEmpty()) { wrong = wrong + " F21: " + wF21 + ";"; }
+    checked = checked + 1;
+    string rF22 = keyWrong(name: "F22", number: 113);
+    if (!rF22.isEmpty()) { wrong = wrong + " F22: " + rF22 + ";"; }
+    string wF22 = keyWritten(name: "F22", number: 113);
+    if (!wF22.isEmpty()) { wrong = wrong + " F22: " + wF22 + ";"; }
+    checked = checked + 1;
+    string rF23 = keyWrong(name: "F23", number: 114);
+    if (!rF23.isEmpty()) { wrong = wrong + " F23: " + rF23 + ";"; }
+    string wF23 = keyWritten(name: "F23", number: 114);
+    if (!wF23.isEmpty()) { wrong = wrong + " F23: " + wF23 + ";"; }
+    checked = checked + 1;
+    string rF24 = keyWrong(name: "F24", number: 115);
+    if (!rF24.isEmpty()) { wrong = wrong + " F24: " + rF24 + ";"; }
+    string wF24 = keyWritten(name: "F24", number: 115);
+    if (!wF24.isEmpty()) { wrong = wrong + " F24: " + wF24 + ";"; }
+    checked = checked + 1;
+    string rControlLeft = keyWrong(name: "ControlLeft", number: 224);
+    if (!rControlLeft.isEmpty()) { wrong = wrong + " ControlLeft: " + rControlLeft + ";"; }
+    string wControlLeft = keyWritten(name: "ControlLeft", number: 224);
+    if (!wControlLeft.isEmpty()) { wrong = wrong + " ControlLeft: " + wControlLeft + ";"; }
+    checked = checked + 1;
+    string rShiftLeft = keyWrong(name: "ShiftLeft", number: 225);
+    if (!rShiftLeft.isEmpty()) { wrong = wrong + " ShiftLeft: " + rShiftLeft + ";"; }
+    string wShiftLeft = keyWritten(name: "ShiftLeft", number: 225);
+    if (!wShiftLeft.isEmpty()) { wrong = wrong + " ShiftLeft: " + wShiftLeft + ";"; }
+    checked = checked + 1;
+    string rAltLeft = keyWrong(name: "AltLeft", number: 226);
+    if (!rAltLeft.isEmpty()) { wrong = wrong + " AltLeft: " + rAltLeft + ";"; }
+    string wAltLeft = keyWritten(name: "AltLeft", number: 226);
+    if (!wAltLeft.isEmpty()) { wrong = wrong + " AltLeft: " + wAltLeft + ";"; }
+    checked = checked + 1;
+    string rMetaLeft = keyWrong(name: "MetaLeft", number: 227);
+    if (!rMetaLeft.isEmpty()) { wrong = wrong + " MetaLeft: " + rMetaLeft + ";"; }
+    string wMetaLeft = keyWritten(name: "MetaLeft", number: 227);
+    if (!wMetaLeft.isEmpty()) { wrong = wrong + " MetaLeft: " + wMetaLeft + ";"; }
+    checked = checked + 1;
+    string rControlRight = keyWrong(name: "ControlRight", number: 228);
+    if (!rControlRight.isEmpty()) { wrong = wrong + " ControlRight: " + rControlRight + ";"; }
+    string wControlRight = keyWritten(name: "ControlRight", number: 228);
+    if (!wControlRight.isEmpty()) { wrong = wrong + " ControlRight: " + wControlRight + ";"; }
+    checked = checked + 1;
+    string rShiftRight = keyWrong(name: "ShiftRight", number: 229);
+    if (!rShiftRight.isEmpty()) { wrong = wrong + " ShiftRight: " + rShiftRight + ";"; }
+    string wShiftRight = keyWritten(name: "ShiftRight", number: 229);
+    if (!wShiftRight.isEmpty()) { wrong = wrong + " ShiftRight: " + wShiftRight + ";"; }
+    checked = checked + 1;
+    string rAltRight = keyWrong(name: "AltRight", number: 230);
+    if (!rAltRight.isEmpty()) { wrong = wrong + " AltRight: " + rAltRight + ";"; }
+    string wAltRight = keyWritten(name: "AltRight", number: 230);
+    if (!wAltRight.isEmpty()) { wrong = wrong + " AltRight: " + wAltRight + ";"; }
+    checked = checked + 1;
+    string rMetaRight = keyWrong(name: "MetaRight", number: 231);
+    if (!rMetaRight.isEmpty()) { wrong = wrong + " MetaRight: " + rMetaRight + ";"; }
+    string wMetaRight = keyWritten(name: "MetaRight", number: 231);
+    if (!wMetaRight.isEmpty()) { wrong = wrong + " MetaRight: " + wMetaRight + ";"; }
+    checked = checked + 1;
+    string name = "every Key reads and writes by its name (${checked} names)";
+    if (wrong.isEmpty()) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: "wrong:" + wrong); }
+    string bad = "\"Arrowup\"";
+    Result<Key, Owned<Error>> read = deserializeJsonBuffer::<Key>(src: copy bad, strict: true);
+    string refusal = "";
+    match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            refusal = "read as ${got}";
+        }
+        case Err(error: e): { refusal = e.message(); }
+    };
+    string listed = "`Arrowup` is not a `Key`";
+    string named = "`ArrowUp`";
+    string refusedName = "a misspelt Key (`Arrowup`) is refused with the names listed";
+    if (refusal.contains(substring: listed) && refusal.contains(substring: named)) { t.verdict(name: refusedName, why: ""); }
+    else { t.verdict(name: refusedName, why: "the refusal: " + refusal); }
+}
+
+// Every PadButton by name: 17 names.
+fn void padButtonNames(ref Tally t) {
+    string wrong = "";
+    int32 checked = 0;
+    string rSouth = padButtonWrong(name: "South", number: 0);
+    if (!rSouth.isEmpty()) { wrong = wrong + " South: " + rSouth + ";"; }
+    string wSouth = padButtonWritten(name: "South", number: 0);
+    if (!wSouth.isEmpty()) { wrong = wrong + " South: " + wSouth + ";"; }
+    checked = checked + 1;
+    string rEast = padButtonWrong(name: "East", number: 1);
+    if (!rEast.isEmpty()) { wrong = wrong + " East: " + rEast + ";"; }
+    string wEast = padButtonWritten(name: "East", number: 1);
+    if (!wEast.isEmpty()) { wrong = wrong + " East: " + wEast + ";"; }
+    checked = checked + 1;
+    string rWest = padButtonWrong(name: "West", number: 2);
+    if (!rWest.isEmpty()) { wrong = wrong + " West: " + rWest + ";"; }
+    string wWest = padButtonWritten(name: "West", number: 2);
+    if (!wWest.isEmpty()) { wrong = wrong + " West: " + wWest + ";"; }
+    checked = checked + 1;
+    string rNorth = padButtonWrong(name: "North", number: 3);
+    if (!rNorth.isEmpty()) { wrong = wrong + " North: " + rNorth + ";"; }
+    string wNorth = padButtonWritten(name: "North", number: 3);
+    if (!wNorth.isEmpty()) { wrong = wrong + " North: " + wNorth + ";"; }
+    checked = checked + 1;
+    string rLeftShoulder = padButtonWrong(name: "LeftShoulder", number: 4);
+    if (!rLeftShoulder.isEmpty()) { wrong = wrong + " LeftShoulder: " + rLeftShoulder + ";"; }
+    string wLeftShoulder = padButtonWritten(name: "LeftShoulder", number: 4);
+    if (!wLeftShoulder.isEmpty()) { wrong = wrong + " LeftShoulder: " + wLeftShoulder + ";"; }
+    checked = checked + 1;
+    string rRightShoulder = padButtonWrong(name: "RightShoulder", number: 5);
+    if (!rRightShoulder.isEmpty()) { wrong = wrong + " RightShoulder: " + rRightShoulder + ";"; }
+    string wRightShoulder = padButtonWritten(name: "RightShoulder", number: 5);
+    if (!wRightShoulder.isEmpty()) { wrong = wrong + " RightShoulder: " + wRightShoulder + ";"; }
+    checked = checked + 1;
+    string rLeftTrigger = padButtonWrong(name: "LeftTrigger", number: 6);
+    if (!rLeftTrigger.isEmpty()) { wrong = wrong + " LeftTrigger: " + rLeftTrigger + ";"; }
+    string wLeftTrigger = padButtonWritten(name: "LeftTrigger", number: 6);
+    if (!wLeftTrigger.isEmpty()) { wrong = wrong + " LeftTrigger: " + wLeftTrigger + ";"; }
+    checked = checked + 1;
+    string rRightTrigger = padButtonWrong(name: "RightTrigger", number: 7);
+    if (!rRightTrigger.isEmpty()) { wrong = wrong + " RightTrigger: " + rRightTrigger + ";"; }
+    string wRightTrigger = padButtonWritten(name: "RightTrigger", number: 7);
+    if (!wRightTrigger.isEmpty()) { wrong = wrong + " RightTrigger: " + wRightTrigger + ";"; }
+    checked = checked + 1;
+    string rBack = padButtonWrong(name: "Back", number: 8);
+    if (!rBack.isEmpty()) { wrong = wrong + " Back: " + rBack + ";"; }
+    string wBack = padButtonWritten(name: "Back", number: 8);
+    if (!wBack.isEmpty()) { wrong = wrong + " Back: " + wBack + ";"; }
+    checked = checked + 1;
+    string rStart = padButtonWrong(name: "Start", number: 9);
+    if (!rStart.isEmpty()) { wrong = wrong + " Start: " + rStart + ";"; }
+    string wStart = padButtonWritten(name: "Start", number: 9);
+    if (!wStart.isEmpty()) { wrong = wrong + " Start: " + wStart + ";"; }
+    checked = checked + 1;
+    string rLeftStick = padButtonWrong(name: "LeftStick", number: 10);
+    if (!rLeftStick.isEmpty()) { wrong = wrong + " LeftStick: " + rLeftStick + ";"; }
+    string wLeftStick = padButtonWritten(name: "LeftStick", number: 10);
+    if (!wLeftStick.isEmpty()) { wrong = wrong + " LeftStick: " + wLeftStick + ";"; }
+    checked = checked + 1;
+    string rRightStick = padButtonWrong(name: "RightStick", number: 11);
+    if (!rRightStick.isEmpty()) { wrong = wrong + " RightStick: " + rRightStick + ";"; }
+    string wRightStick = padButtonWritten(name: "RightStick", number: 11);
+    if (!wRightStick.isEmpty()) { wrong = wrong + " RightStick: " + wRightStick + ";"; }
+    checked = checked + 1;
+    string rDpadUp = padButtonWrong(name: "DpadUp", number: 12);
+    if (!rDpadUp.isEmpty()) { wrong = wrong + " DpadUp: " + rDpadUp + ";"; }
+    string wDpadUp = padButtonWritten(name: "DpadUp", number: 12);
+    if (!wDpadUp.isEmpty()) { wrong = wrong + " DpadUp: " + wDpadUp + ";"; }
+    checked = checked + 1;
+    string rDpadDown = padButtonWrong(name: "DpadDown", number: 13);
+    if (!rDpadDown.isEmpty()) { wrong = wrong + " DpadDown: " + rDpadDown + ";"; }
+    string wDpadDown = padButtonWritten(name: "DpadDown", number: 13);
+    if (!wDpadDown.isEmpty()) { wrong = wrong + " DpadDown: " + wDpadDown + ";"; }
+    checked = checked + 1;
+    string rDpadLeft = padButtonWrong(name: "DpadLeft", number: 14);
+    if (!rDpadLeft.isEmpty()) { wrong = wrong + " DpadLeft: " + rDpadLeft + ";"; }
+    string wDpadLeft = padButtonWritten(name: "DpadLeft", number: 14);
+    if (!wDpadLeft.isEmpty()) { wrong = wrong + " DpadLeft: " + wDpadLeft + ";"; }
+    checked = checked + 1;
+    string rDpadRight = padButtonWrong(name: "DpadRight", number: 15);
+    if (!rDpadRight.isEmpty()) { wrong = wrong + " DpadRight: " + rDpadRight + ";"; }
+    string wDpadRight = padButtonWritten(name: "DpadRight", number: 15);
+    if (!wDpadRight.isEmpty()) { wrong = wrong + " DpadRight: " + wDpadRight + ";"; }
+    checked = checked + 1;
+    string rGuide = padButtonWrong(name: "Guide", number: 16);
+    if (!rGuide.isEmpty()) { wrong = wrong + " Guide: " + rGuide + ";"; }
+    string wGuide = padButtonWritten(name: "Guide", number: 16);
+    if (!wGuide.isEmpty()) { wrong = wrong + " Guide: " + wGuide + ";"; }
+    checked = checked + 1;
+    string name = "every PadButton reads and writes by its name (${checked} names)";
+    if (wrong.isEmpty()) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: "wrong:" + wrong); }
+    string bad = "\"RightBumper\"";
+    Result<PadButton, Owned<Error>> read = deserializeJsonBuffer::<PadButton>(src: copy bad, strict: true);
+    string refusal = "";
+    match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            refusal = "read as ${got}";
+        }
+        case Err(error: e): { refusal = e.message(); }
+    };
+    string listed = "`RightBumper` is not a `PadButton`";
+    string named = "`RightShoulder`";
+    string refusedName = "a misspelt PadButton (`RightBumper`) is refused with the names listed";
+    if (refusal.contains(substring: listed) && refusal.contains(substring: named)) { t.verdict(name: refusedName, why: ""); }
+    else { t.verdict(name: refusedName, why: "the refusal: " + refusal); }
+}
+
+// Every PadAxis by name: 4 names.
+fn void padAxisNames(ref Tally t) {
+    string wrong = "";
+    int32 checked = 0;
+    string rLeftX = padAxisWrong(name: "LeftX", number: 0);
+    if (!rLeftX.isEmpty()) { wrong = wrong + " LeftX: " + rLeftX + ";"; }
+    string wLeftX = padAxisWritten(name: "LeftX", number: 0);
+    if (!wLeftX.isEmpty()) { wrong = wrong + " LeftX: " + wLeftX + ";"; }
+    checked = checked + 1;
+    string rLeftY = padAxisWrong(name: "LeftY", number: 1);
+    if (!rLeftY.isEmpty()) { wrong = wrong + " LeftY: " + rLeftY + ";"; }
+    string wLeftY = padAxisWritten(name: "LeftY", number: 1);
+    if (!wLeftY.isEmpty()) { wrong = wrong + " LeftY: " + wLeftY + ";"; }
+    checked = checked + 1;
+    string rRightX = padAxisWrong(name: "RightX", number: 2);
+    if (!rRightX.isEmpty()) { wrong = wrong + " RightX: " + rRightX + ";"; }
+    string wRightX = padAxisWritten(name: "RightX", number: 2);
+    if (!wRightX.isEmpty()) { wrong = wrong + " RightX: " + wRightX + ";"; }
+    checked = checked + 1;
+    string rRightY = padAxisWrong(name: "RightY", number: 3);
+    if (!rRightY.isEmpty()) { wrong = wrong + " RightY: " + rRightY + ";"; }
+    string wRightY = padAxisWritten(name: "RightY", number: 3);
+    if (!wRightY.isEmpty()) { wrong = wrong + " RightY: " + wRightY + ";"; }
+    checked = checked + 1;
+    string name = "every PadAxis reads and writes by its name (${checked} names)";
+    if (wrong.isEmpty()) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: "wrong:" + wrong); }
+    string bad = "\"LeftStickX\"";
+    Result<PadAxis, Owned<Error>> read = deserializeJsonBuffer::<PadAxis>(src: copy bad, strict: true);
+    string refusal = "";
+    match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            refusal = "read as ${got}";
+        }
+        case Err(error: e): { refusal = e.message(); }
+    };
+    string listed = "`LeftStickX` is not a `PadAxis`";
+    string named = "`LeftX`";
+    string refusedName = "a misspelt PadAxis (`LeftStickX`) is refused with the names listed";
+    if (refusal.contains(substring: listed) && refusal.contains(substring: named)) { t.verdict(name: refusedName, why: ""); }
+    else { t.verdict(name: refusedName, why: "the refusal: " + refusal); }
+}
+
+// Every PointerButton by name: 9 names.
+fn void pointerButtonNames(ref Tally t) {
+    string wrong = "";
+    int32 checked = 0;
+    string rLeft = pointerButtonWrong(name: "Left", number: 0);
+    if (!rLeft.isEmpty()) { wrong = wrong + " Left: " + rLeft + ";"; }
+    string wLeft = pointerButtonWritten(name: "Left", number: 0);
+    if (!wLeft.isEmpty()) { wrong = wrong + " Left: " + wLeft + ";"; }
+    checked = checked + 1;
+    string rMiddle = pointerButtonWrong(name: "Middle", number: 1);
+    if (!rMiddle.isEmpty()) { wrong = wrong + " Middle: " + rMiddle + ";"; }
+    string wMiddle = pointerButtonWritten(name: "Middle", number: 1);
+    if (!wMiddle.isEmpty()) { wrong = wrong + " Middle: " + wMiddle + ";"; }
+    checked = checked + 1;
+    string rRight = pointerButtonWrong(name: "Right", number: 2);
+    if (!rRight.isEmpty()) { wrong = wrong + " Right: " + rRight + ";"; }
+    string wRight = pointerButtonWritten(name: "Right", number: 2);
+    if (!wRight.isEmpty()) { wrong = wrong + " Right: " + wRight + ";"; }
+    checked = checked + 1;
+    string rBack = pointerButtonWrong(name: "Back", number: 3);
+    if (!rBack.isEmpty()) { wrong = wrong + " Back: " + rBack + ";"; }
+    string wBack = pointerButtonWritten(name: "Back", number: 3);
+    if (!wBack.isEmpty()) { wrong = wrong + " Back: " + wBack + ";"; }
+    checked = checked + 1;
+    string rForward = pointerButtonWrong(name: "Forward", number: 4);
+    if (!rForward.isEmpty()) { wrong = wrong + " Forward: " + rForward + ";"; }
+    string wForward = pointerButtonWritten(name: "Forward", number: 4);
+    if (!wForward.isEmpty()) { wrong = wrong + " Forward: " + wForward + ";"; }
+    checked = checked + 1;
+    string rEraser = pointerButtonWrong(name: "Eraser", number: 5);
+    if (!rEraser.isEmpty()) { wrong = wrong + " Eraser: " + rEraser + ";"; }
+    string wEraser = pointerButtonWritten(name: "Eraser", number: 5);
+    if (!wEraser.isEmpty()) { wrong = wrong + " Eraser: " + wEraser + ";"; }
+    checked = checked + 1;
+    string rSixth = pointerButtonWrong(name: "Sixth", number: 6);
+    if (!rSixth.isEmpty()) { wrong = wrong + " Sixth: " + rSixth + ";"; }
+    string wSixth = pointerButtonWritten(name: "Sixth", number: 6);
+    if (!wSixth.isEmpty()) { wrong = wrong + " Sixth: " + wSixth + ";"; }
+    checked = checked + 1;
+    string rSeventh = pointerButtonWrong(name: "Seventh", number: 7);
+    if (!rSeventh.isEmpty()) { wrong = wrong + " Seventh: " + rSeventh + ";"; }
+    string wSeventh = pointerButtonWritten(name: "Seventh", number: 7);
+    if (!wSeventh.isEmpty()) { wrong = wrong + " Seventh: " + wSeventh + ";"; }
+    checked = checked + 1;
+    string rEighth = pointerButtonWrong(name: "Eighth", number: 8);
+    if (!rEighth.isEmpty()) { wrong = wrong + " Eighth: " + rEighth + ";"; }
+    string wEighth = pointerButtonWritten(name: "Eighth", number: 8);
+    if (!wEighth.isEmpty()) { wrong = wrong + " Eighth: " + wEighth + ";"; }
+    checked = checked + 1;
+    string name = "every PointerButton reads and writes by its name (${checked} names)";
+    if (wrong.isEmpty()) { t.verdict(name: name, why: ""); } else { t.verdict(name: name, why: "wrong:" + wrong); }
+    string bad = "\"left\"";
+    Result<PointerButton, Owned<Error>> read = deserializeJsonBuffer::<PointerButton>(src: copy bad, strict: true);
+    string refusal = "";
+    match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            refusal = "read as ${got}";
+        }
+        case Err(error: e): { refusal = e.message(); }
+    };
+    string listed = "`left` is not a `PointerButton`";
+    string named = "`Left`";
+    string refusedName = "a misspelt PointerButton (`left`) is refused with the names listed";
+    if (refusal.contains(substring: listed) && refusal.contains(substring: named)) { t.verdict(name: refusedName, why: ""); }
+    else { t.verdict(name: refusedName, why: "the refusal: " + refusal); }
+}
+
+// A key's number is not its name: a record names a key, so a HID id in its place is refused.
+fn void keyNumberRefused(ref Tally t) {
+    Result<Key, Owned<Error>> read = deserializeJsonBuffer::<Key>(src: "82", strict: true);
+    string why = "";
+    match (read) {
+        case Ok(value: v): {
+            int32 got = cast<int32>(v);
+            why = "read as ${got}";
+        }
+        case Err(error: e): { }
+    };
+    t.verdict(name: "a key's number in place of its name is refused", why: why);
+}
+
+fn void nameCases(ref Tally t) {
+    keyNames(t: t);
+    padButtonNames(t: t);
+    padAxisNames(t: t);
+    pointerButtonNames(t: t);
+    keyNumberRefused(t: t);
+}

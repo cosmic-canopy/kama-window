@@ -189,6 +189,11 @@ license; without it, pads are read through XInput.
 - **`Key`** has 119 keys, each the DOM's `code` name with its HID id: letters, digits, the editing and navigation keys,
   F1 to F24, the keypad, the modifiers left and right, and the international keys. GLFW's key tokens translate through
   one table; a token the table does not map is `Key::Unknown`, and no two map to one `Key`.
+- **The names are read and written** (WIN-25): `Key`, `PadButton`, `PadAxis` and `PointerButton` each serialize as
+  their case's name, through `@generate(Serializable, Deserializable)`, so `"ArrowUp"` reads as `Key::ArrowUp` in any
+  of kama's formats, and a bindings record or a rebinding screen names a control as this package does. A name no case
+  has is refused, the reader listing every name (``Arrowup` is not a `Key`: expected …``), and so is a number in a
+  name's place. The names are a contract, as the numbers are: a case renamed would leave a saved binding unread.
 
 ## Gamepads
 
@@ -287,7 +292,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 249 cases. They cover:
+- `tests/`, one program, natively, debug and release: 258 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - what is held, on a headless window (`tests/src/held.kama`): the pairing of ups and downs, `Key::Unknown`, the
     release's order and bits, the room kept for ups in a full ring, a replayed stream, and `releaseHeld`;
@@ -298,6 +303,9 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - GLFW's own focus path on a hidden system window, driven by Win32 messages sent to it, so it never takes the focus:
     GLFW's ups after the focus callback dropped, a key released once, either way;
   - the plain values;
+  - the names (`tests/src/names.kama`): every `Key`, `PadButton`, `PadAxis` and `PointerButton` read from its name and
+    written as it, against a table of names and numbers in the test, a misspelling of each refused with the names
+    listed, and a key's number refused in its name's place;
   - the GLFW key table, swept through the externed translator (118 keys mapped, none twice), and its button table;
   - the native record's count, read through the seam's `winseam_live_records()`: a handle outliving its window and
     reading it as closed, copies, either drop order, and an adopted handle;
@@ -319,12 +327,12 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   The system windows are skipped when `KAMA_WINDOW_NO_DISPLAY` is set. **A test run never takes the keyboard:** every
   window it shows opens with `focused: false` (`tests/src/quiet.kama`), only after the hidden cases have passed, and
   the program shows no more once one has taken the foreground;
-- the same program under node: 163 cases, the headless ones, the DOM key table, and checks that opening a window
+- the same program under node: 172 cases, the headless ones, the DOM key table, and checks that opening a window
   refuses with no page.
 - the same program built for the web with its own page, `tests/web/shell.html`, in every browser `tools/browsers.mjs`
   finds (`KAMA_BROWSER` names one), headless and at a device scale of 1.5: under `kama run --target WASM --scale 1.5` in
-  Edge, Chrome as installed and the pinned Firefox, 253 cases, every one but the trusted input; and through
-  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 264. Beside the headless ones (`tests/src/web.kama`):
+  Edge, Chrome as installed and the pinned Firefox, 262 cases, every one but the trusted input; and through
+  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 273. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,

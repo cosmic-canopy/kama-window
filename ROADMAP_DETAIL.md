@@ -8,16 +8,6 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
-<a id="control-names"></a>
-## WIN-25: a key's and a button's name
-
-kyoten's bindings records name a control by this package's own names (`ArrowUp`, `RightShoulder`, `LeftX`; kyoten's
-`docs/design/input.md`, decided 2026-11-21). `@generate(Serializable, Deserializable)` on `Key`, `PadButton`, `PadAxis`
-and `PointerButton` reads and writes each by its case name, and kama's reader refuses a misspelling by listing the names
-(``Arrowup` is not a `Key` … expected …``; probed on kama 0.9.978 with an enum of explicit values and an underlying
-type, kyoten's `.scratch/s44/step8/names/`). So no second table of names exists anywhere, and a rebinding screen writes
-a key's name the same way. Done: a case per enum reading every name back to its case, and refusing a wrong one.
-
 <a id="event-times"></a>
 ## WIN-26: each event's time
 

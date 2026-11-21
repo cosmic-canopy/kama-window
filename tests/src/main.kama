@@ -8,7 +8,7 @@ import {
     window::Window, window::WindowError, window::Event, window::Key, window::PointerButton, window::Pointer,
     window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
     keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
-    pointerCases, mouseAt, webWindow, webFinish, padCases, systemPadCases, noSystemPads,
+    pointerCases, mouseAt, webWindow, webFinish, padCases, systemPadCases, noSystemPads, nameCases,
 };
 
 export { Tally, describe, summary };
@@ -264,6 +264,7 @@ unsafe fn uint8 appMain() {
     noSystemPads();
     queueOrder(t: t);
     plainValues(t: t);
+    nameCases(t: t);
     queueDrops(t: t);
     queueDropsPartial(t: t);
     heldCases(t: t);

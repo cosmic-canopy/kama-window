@@ -60,7 +60,8 @@ type value Mods {
 }
 
 // A pointer's button, numbered as the W3C's `button` is: a touch contact and a pen's tip are `Left`, a pen's barrel
-// `Right`. A mouse's sixth to eighth follow the pen's eraser.
+// `Right`. A mouse's sixth to eighth follow the pen's eraser. Read and written by its case's name (WIN-25), as `Key` is.
+@generate(Serializable, Deserializable)
 type enum PointerButton : uint8 {
     Left = 0, Middle = 1, Right = 2, Back = 3, Forward = 4, Eraser = 5, Sixth = 6, Seventh = 7, Eighth = 8
 }
@@ -73,13 +74,17 @@ type enum ScrollUnit : uint8 { Lines = 0, Pixels = 1 }
 
 // A gamepad's button, numbered as the W3C's standard gamepad numbers it. The four face buttons are named by their place,
 // as a `Key` is: Xbox's A, PlayStation's Cross and Nintendo's B are each `South`. What a pad prints on them is its own.
+// Read and written by its case's name (WIN-25), as `Key` is.
+@generate(Serializable, Deserializable)
 type enum PadButton : uint8 {
     South = 0, East = 1, West = 2, North = 3, LeftShoulder = 4, RightShoulder = 5, LeftTrigger = 6, RightTrigger = 7,
     Back = 8, Start = 9, LeftStick = 10, RightStick = 11, DpadUp = 12, DpadDown = 13, DpadLeft = 14, DpadRight = 15,
     Guide = 16
 }
 
-// A gamepad's stick axis, numbered as the W3C's standard gamepad numbers it: -1 to 1, right and down positive.
+// A gamepad's stick axis, numbered as the W3C's standard gamepad numbers it: -1 to 1, right and down positive. Read and
+// written by its case's name (WIN-25), as `Key` is.
+@generate(Serializable, Deserializable)
 type enum PadAxis : uint8 { LeftX = 0, LeftY = 1, RightX = 2, RightY = 3 }
 
 // A gamepad as one read of it: whether a pad is in its slot, each button's travel (0 to 1, by `PadButton`) and each
@@ -243,6 +248,11 @@ type value Size {
 }
 
 // A physical key: the name is the DOM's `KeyboardEvent.code`, the number its USB HID usage id (the keyboard page).
+//
+// Read and written by that name (WIN-25), so a bindings record or a rebinding screen names a key as the package does,
+// with no second table of names: `"ArrowUp"` reads as `Key::ArrowUp`, and a misspelling is refused with every name
+// listed. The names are a contract, as the numbers are: a case renamed would leave a saved binding unread.
+@generate(Serializable, Deserializable)
 type enum Key : uint16 {
     Unknown = 0,
     KeyA = 4, KeyB = 5, KeyC = 6, KeyD = 7, KeyE = 8, KeyF = 9, KeyG = 10, KeyH = 11, KeyI = 12, KeyJ = 13, KeyK = 14,
