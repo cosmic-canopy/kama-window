@@ -93,8 +93,9 @@ typedef struct winseam_event {
     uint64_t at;            // when it happened: nanoseconds on kama's monotonic clock (`std::time`'s `Instant`)
 } winseam_event;
 
-// Each event's time (WIN-26), on kama's monotonic clock, which `winseam_now` reads: the package's `expose fn`, so the C
-// seam and kama read one clock. The best each backend has:
+// Each event's time (WIN-26), on kama's monotonic clock: winseam.c reads it through kama's own binding of it,
+// `kama_now_mono_ns` (kama_time.h), the function `std::time`'s `Instant` reads, so the C seam and kama read one clock.
+// The best each backend has:
 // - natively, the moment GLFW's callback runs (GLFW gives no time of its own, and calls back inside `glfwPollEvents`)
 //   and the moment the pump reads the pads;
 // - on the web, the DOM event's `timeStamp` and a pad's `Gamepad.timestamp`, on `performance.now()`'s timeline, which
@@ -107,7 +108,6 @@ typedef struct winseam_event {
 // - a posted record keeps its own, which `winseam_post` and `winseam_pad_sample` take as they are given.
 // A coalesced move or scroll takes the newest sample's time, a resize or a scale its last's, and a `Dropped` the time
 // of the first event it counts, or of the owed up the ring puts before it while it overflows.
-uint64_t winseam_now(void);
 
 typedef struct winseam_window winseam_window;
 

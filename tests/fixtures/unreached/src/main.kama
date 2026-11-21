@@ -1,0 +1,8 @@
+// A program that depends on @kama/window and reaches none of it (WIN-26): kama compiles and links a dependency's C
+// whether or not its kama is reached, so the package's C must name nothing that lives only in its kama.
+import { core::println };
+
+fn uint8 main() {
+    println(s: "unreached: linked");
+    return 0;
+}

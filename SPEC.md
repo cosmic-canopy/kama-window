@@ -184,8 +184,9 @@ license; without it, pads are read through XInput.
 
 - **`TimedEvent`** is a plain value, the `event` and `at`, the time it happened (WIN-26): an `Instant` on kama's
   monotonic clock, `std::time`'s, so it compares with `monotonicNow()` and with a frame's time, and a program can tell
-  which of its simulation steps an input belongs to. The C seam reads that clock through the package's own
-  `expose fn`, so the seam and the program read one clock. The time is the best each backend has:
+  which of its simulation steps an input belongs to. The C seam reads that clock through kama's own binding of it
+  (`kama_now_mono_ns`, which `std::time` reads), so the seam and the program read one clock. The time is the best each
+  backend has:
   - **natively,** the moment GLFW's callback ran (GLFW gives no time of its own, and calls back inside `pump()`, or
     at once for a message sent to the window), and for a pad, the moment the pump read it;
   - **on the web,** the browser's own: a DOM event's `timeStamp` and a pad's `Gamepad.timestamp`, on

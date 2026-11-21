@@ -1,7 +1,5 @@
 // The C seam (csrc/winseam.h), as kama. An extern never leaves its file, so each is published through a wrapper.
 
-import { std::time::monotonicNow };
-
 export {
     winseam_event,
     KIND_KEY_DOWN, KIND_KEY_UP, KIND_TEXT, KIND_POINTER_MOVE, KIND_POINTER_DOWN, KIND_POINTER_UP, KIND_POINTER_CANCEL,
@@ -105,11 +103,6 @@ extern fn int32 winseam_add_pad_mappings(UnsafeConstPtr<cchar> text, int32 lengt
 unsafe fn void padSample(UnsafePtr window, int32 slot, const ref winseam_pad sample, uint64 at) {
     winseam_pad_sample(window: window, slot: slot, sample: addr(of: sample), at: at);
 }
-
-// kama's monotonic clock, for the C seam (WIN-26): what an event the system sends is stamped with, so the seam and a
-// program read one clock, `std::time`'s `Instant`.
-@linkName("winseam_now")
-expose fn uint64 seamNow() { return monotonicNow().rawNanos; }
 unsafe fn void padRead(UnsafePtr window, int32 slot, UnsafePtr into) { winseam_pad_read(window: window, slot: slot, into: into); }
 unsafe fn void setPadsWhenUnfocused(UnsafePtr window, int32 on) { winseam_set_pads_when_unfocused(window: window, on: on); }
 

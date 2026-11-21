@@ -8,6 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+// kama's own binding of its monotonic clock, the function `std::time`'s `Instant` reads (WIN-26). Not an `expose fn` of
+// this package's: a program links a dependency's C whether or not it reaches the dependency's kama, so this C names
+// nothing that lives only in the package's kama (tests/fixtures/unreached, which reaches none of it, must link).
+#include "kama_time.h"
+
 #ifndef __EMSCRIPTEN__
 #include <GLFW/glfw3.h>
 #if defined(_WIN32)
@@ -102,6 +107,9 @@ static int32_t copy_text(const char *text, uint8_t *dst, int32_t capacity) {
 }
 
 // ---- each record's time (WIN-26, winseam.h) ------------------------------------------------------------------------
+
+// Now, on kama's monotonic clock.
+static uint64_t winseam_now(void) { return kama_now_mono_ns(); }
 
 // The pumps' times on the web, where a record carries the browser's: a pump's start, and the one before it.
 static uint64_t g_pump_at = 0;

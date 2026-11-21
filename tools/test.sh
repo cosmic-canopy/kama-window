@@ -100,6 +100,38 @@ for mode in debug release; do
     fi
 done
 
+# A program that depends on the package and reaches none of it still links (WIN-26): kama compiles and links a
+# dependency's C whether or not its kama is reached, so the C names nothing that lives only in the package's kama. Found
+# when an `expose fn` the C called was missing from kyoten's frame guard; natively, and for the web under node.
+step "a program that reaches none of the package links (tests/fixtures/unreached)"
+"$KAMA" pkg install tests/fixtures/unreached/kama.json > /dev/null
+unreachedRan() {
+    local log="$1" leg="$2"
+    if tr -d '\r' < "$log" | grep -qx "unreached: linked"; then echo "ok   $leg: a program reaching none of the package links and runs"
+    else echo "FAIL $leg: a program reaching none of the package did not link and run"; tail -5 "$log"; failed=1; fi
+}
+if "$KAMA" build tests/fixtures/unreached/kama.json -o "tests/out/unreached/unreached$EXE" > tests/out/unreached-build.log 2>&1; then
+    "tests/out/unreached/unreached$EXE" > tests/out/unreached-native.log 2>&1 || true
+    unreachedRan tests/out/unreached-native.log "natively"
+else
+    tail -5 tests/out/unreached-build.log
+    echo "FAIL natively: a program reaching none of the package did not link"
+    failed=1
+fi
+if command -v emcc >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    if "$KAMA" build tests/fixtures/unreached/kama.json --target WASM -o tests/out/unreached-wasm/unreached.js \
+            > tests/out/unreached-wasm-build.log 2>&1; then
+        node tests/out/unreached-wasm/unreached.js > tests/out/unreached-wasm.log 2>&1 || true
+        unreachedRan tests/out/unreached-wasm.log "on wasm"
+    else
+        tail -5 tests/out/unreached-wasm-build.log
+        echo "FAIL on wasm: a program reaching none of the package did not link"
+        failed=1
+    fi
+else
+    echo "skip no emcc or node on PATH (run from an interactive UCRT64 shell, bash -lic)"
+fi
+
 step "browser leg, headless"
 if ! command -v emcc >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     echo "skip no emcc or node on PATH (run from an interactive UCRT64 shell, bash -lic)"

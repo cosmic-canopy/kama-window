@@ -1,0 +1,12 @@
+{
+  "name": "unreached",
+  "version": "0.1.0",
+  "kind": "executable",
+  "kama": ">=0.9.958",
+  "description": "A program that depends on @kama/window and reaches none of it: the package's C must still link (WIN-26)",
+  "entry": "src/main.kama",
+  "modules": { ".": { "visibility": "internal" } },
+  "dependencies": {
+    "@kama/window": { "path": "../../.." }
+  }
+}

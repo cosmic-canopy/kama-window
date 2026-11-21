@@ -11,7 +11,7 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   clock), so a caller reads `t.event` where it read the event; `post(event:, at:)` and `postPad(slot:, pad:, at:)` take
   the time they post at, which the events keep. The time is the best each backend has: natively the moment GLFW's
   callback ran and the moment the pump read a pad; on the web the DOM event's `timeStamp` and a pad's
-  `Gamepad.timestamp`, held to the pumps. The C seam reads kama's clock through the package's own `expose fn`, and a
+  `Gamepad.timestamp`, held to the pumps. The C seam reads kama's clock through kama's own binding of it, and a
   record carries its time (96 bytes, where it was 88). `tests/` gains `times.kama`: 46 cases natively, 32 under node, 49
   in each browser.
 - **A key's and a button's name** (WIN-25, 2026-11-21, kama 0.9.978): `Key`, `PadButton`, `PadAxis` and
