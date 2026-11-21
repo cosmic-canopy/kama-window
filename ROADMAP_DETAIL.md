@@ -33,8 +33,17 @@ best its backend has.
   (`:939`), and an XInput pad with the poll's (`SDL_xinputjoystick.c:336`).
 - **A posted event** takes the time it is posted with, so a replay keeps its own.
 
-The shape (`pollEvent` handing the event and its time together, which every caller changes for) is this row's question.
-Done: on every backend an event's time is no later than the pump that delivered it and no earlier than the one before,
+**The row's question, the shape** (asked at kyoten's forty-fourth session's readying, 2026-11-21). The callers that
+change: this package's tests (14 `pollEvent`s, 74 `post`s), `@kama/gpu`'s 2, `@kama/graphics`' 2 and kyoten's 1.
+- **(A)** `pollEvent()` hands back the event with its time, `Optional<TimedEvent>`, a plain value of `event` and `at`
+  (an `Instant`), and `post(event:, at:)` takes one, a test's or a replay's own. Every caller changes once, reading
+  `t.event` where it read the event. SDL keeps the time in every event's header, and Unity's events carry theirs.
+- **(B)** The time inside every event: each case gains an `at`, which every `match` arm and every `post` names.
+- **(C)** `lastEventTime()`, the time of the event the last `pollEvent()` took, nothing else changing: easy to read
+  after the wrong poll, and a replay posting its times needs a second call too.
+
+Settled with it, to report: a coalesced move or scroll takes its newest sample's time, a size its last's, and a
+`Dropped` the time of the first event it counts. Done: on every backend an event's time is no later than the pump that delivered it and no earlier than the one before,
 in the order the events come out; on the web, two events a known delay apart keep it.
 
 <a id="retire-driver"></a>
