@@ -42,6 +42,12 @@ forty-fourth session's readying; "so far": a change the build finds is asked). T
 - **(C)** `lastEventTime()`, the time of the event the last `pollEvent()` took, nothing else changing: easy to read
   after the wrong poll, and a replay posting its times needs a second call too.
 
+**`postPad` takes a time too: decided (A)** (the owner, 2026-11-21, "A (Recommended)", asked at kyoten's forty-fifth
+session's start, found reading the code for the row): `postPad(slot:, pad:, at:)`. Every event a posted reading makes
+(the slot's connect, disconnect, downs and ups) carries `at`, as `post(event:, at:)` does, so a test or a replay places
+a pad press at its own time. The package's 42 `postPad` calls change once. Set aside: (B) `postPad` stamping the clock at
+the call, which leaves a test placing a press in a step only by waiting, and a replay's presses at the replay's moment.
+
 Settled with it, to report: a coalesced move or scroll takes its newest sample's time, a size its last's, and a
 `Dropped` the time of the first event it counts. Done: on every backend an event's time is no later than the pump that delivered it and no earlier than the one before,
 in the order the events come out; on the web, two events a known delay apart keep it.
