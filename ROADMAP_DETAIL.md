@@ -21,10 +21,15 @@ Found at kyoten's bump to kama 0.9.1026 (2026-11-22), by `@kama/graphics`' cube,
 the check.
 
 Both ends hold it: the seam passes no value that is no scalar value (the page's `typed()`, and the C's `on_char`), and
-`eventOf` reads the code point with `try cast<char>`, so no value from outside can trap. Its question, for the owner:
-such a key types nothing (A), as Rust's `char::from_u32` answers `None` for one, or types U+FFFD, the replacement
-character (B), as the browser's own `TextEncoder` writes one. Done: a page's key event with a lone surrogate gives the
-answer's event in every browser, and no program ends.
+`eventOf` reads the code point with `try cast<char>`, so no value from outside can trap.
+
+**Decided: such a key types nothing** (the owner, 2026-11-22, (A): "I assume A is the production answer for WIN-27? if
+so we can go with that"). No `Text` event comes of it. Natively GLFW on Windows already drops a lone surrogate, so
+nothing is what every platform can give alike, where U+FFFD would be the web's alone; Rust's `char::from_u32` answers
+`None` for such a value; and a text field never gains a character the player did not type. The other answer was U+FFFD,
+the replacement character, as the browser's own `TextEncoder` writes one. Done: a page's key event with a lone
+surrogate makes no `Text` event in every browser, a code point that is no scalar value reaching the native seam makes
+none, and no program ends.
 
 <a id="retire-driver"></a>
 ## WIN-24: the driver retired
