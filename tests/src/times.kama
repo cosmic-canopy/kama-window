@@ -431,10 +431,6 @@ fn void waitMs(int64 n) {
     while (monotonicNow() < until) { }
 }
 
-// `at` moved back by `nanos`: an `Instant` plus a negative `Duration` traps in std (kyoten's KAMA_GAPS).
-@compileFor(ARCH_WASM32)
-fn Instant back(Instant at, uint64 nanos) { return Instant.of(rawNanos: at.rawNanos - nanos); }
-
 // A time on the web as `performance.now()` gives it, in milliseconds, which kama's clock reads there in nanoseconds.
 @compileFor(ARCH_WASM32)
 fn float64 msOf(Instant at) { return cast<float64>(at.rawNanos) / 1000000.0; }
@@ -469,12 +465,12 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     // A DOM time is as fine as the browser makes it: Firefox's a millisecond, so each bound gives a millisecond.
     Duration grain = Duration.fromMillis(ms: 1);
     expectWithin(t: t, w: w, name: "a DOM key's time is its event's own", want: "KeyDown 13 0 false",
-                 from: back(at: before, nanos: 1000000ui64), to: made + grain, seen: seen);
+                 from: before + (-grain), to: made + grain, seen: seen);
     Instant first = seen;
     expectWithin(t: t, w: w, name: "the text it typed, at its key's time", want: "Text 106",
-                 from: back(at: before, nanos: 1000000ui64), to: made + grain, seen: seen);
+                 from: before + (-grain), to: made + grain, seen: seen);
     expectWithin(t: t, w: w, name: "a key up made 30 ms later keeps its own time", want: "KeyUp 13 0",
-                 from: back(at: waited, nanos: 1000000ui64), to: last + grain, seen: seen);
+                 from: waited + (-grain), to: last + grain, seen: seen);
     Duration gap = seen - first;
     int64 gapMs = gap.asMillis();
     if (gapMs >= 29 && gapMs <= 1000) { t.verdict(name: "two DOM events 30 ms apart keep the gap", why: ""); }
@@ -509,15 +505,15 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     Instant sizeTo = monotonicNow();
     w.pump();
     expectWithin(t: t, w: w, name: "a DOM pointer down is at its event's time", want: "PointerDown mouse1 0 0 [1]",
-                 from: back(at: pointerFrom, nanos: 1000000ui64), to: pointerTo + grain, seen: seen);
+                 from: pointerFrom + (-grain), to: pointerTo + grain, seen: seen);
     expectWithin(t: t, w: w, name: "its up too", want: "PointerUp mouse1 0 0 [0]",
-                 from: back(at: pointerFrom, nanos: 1000000ui64), to: pointerTo + grain, seen: seen);
+                 from: pointerFrom + (-grain), to: pointerTo + grain, seen: seen);
     expectWithin(t: t, w: w, name: "two wheels coalesced in the page's queue are at the newer one's time",
-                 want: "Scroll 0 -150 pixels", from: back(at: wheelFrom, nanos: 1000000ui64), to: wheelTo + grain,
+                 want: "Scroll 0 -150 pixels", from: wheelFrom + (-grain), to: wheelTo + grain,
                  seen: seen);
     string resized = "Resize ${wider} ${css.height}";
     expectWithin(t: t, w: w, name: "a size report's Resize is at the moment it was observed", want: resized,
-                 from: back(at: sizeFrom, nanos: 1000000ui64), to: sizeTo + grain, seen: seen);
+                 from: sizeFrom + (-grain), to: sizeTo + grain, seen: seen);
     windowtests_report_sizes(sel: canvas.cstr(), width: cast<float64>(css.width), height: cast<float64>(css.height),
                              fw: px.width, fh: px.height, scale: cast<float64>(scale));
     w.pump();
@@ -535,8 +531,8 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     Instant focusTo = monotonicNow();
     w.pump();
     expectWithin(t: t, w: w, name: "a blur's Focus is at its DOM event's time", want: "Focus false",
-                 from: back(at: blurFrom, nanos: 1000000ui64), to: blurTo + grain, seen: seen);
-    expectWithin(t: t, w: w, name: "a focus's too", want: "Focus true", from: back(at: focusFrom, nanos: 1000000ui64),
+                 from: blurFrom + (-grain), to: blurTo + grain, seen: seen);
+    expectWithin(t: t, w: w, name: "a focus's too", want: "Focus true", from: focusFrom + (-grain),
                  to: focusTo + grain, seen: seen);
 
     // A DOM event queued before a call the program makes (`releaseHeld`, here with nothing held) is taken after it, so it
@@ -577,7 +573,7 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     w.pump();
     Duration micro = Duration.fromMicros(us: 1);
     expectWithin(t: t, w: w, name: "a pad's down is at its Gamepad.timestamp", want: "PadButtonDown 5 3",
-                 from: back(at: between, nanos: 1000ui64), to: between + micro, seen: seen);
+                 from: between + (-micro), to: between + micro, seen: seen);
     Instant afterSecond = monotonicNow();
     buttons[3] = 0.0;
     windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
@@ -600,7 +596,7 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     w.pump();
     Instant pumpedLast = monotonicNow();
     expectWithin(t: t, w: w, name: "a key down taken before a pad's in one pump", want: "KeyDown 13 0 false",
-                 from: back(at: keyFrom, nanos: 1000000ui64), to: pumpedLast, seen: seen);
+                 from: keyFrom + (-grain), to: pumpedLast, seen: seen);
     Instant keyAt = seen;
     expectWithin(t: t, w: w, name: "its text", want: "Text 106", from: keyAt, to: keyAt, seen: seen);
     expectWithin(t: t, w: w, name: "a pad's down timestamped before the key comes out at the key's time",
