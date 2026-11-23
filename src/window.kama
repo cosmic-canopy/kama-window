@@ -456,12 +456,25 @@ unsafe fn void setPointer(ref winseam_event e, const ref Pointer p) {
 
 unsafe fn uint8 modsOf(int32 n) { return truncate<uint8>(n & 63); }
 
-// A ring record as an Event.
-unsafe fn Event eventOf(const ref winseam_event e) {
+// A ring record as an Event, or None for one that is no event: a Text record whose code point is no Unicode scalar value
+// (WIN-27), which types nothing. The seam passes none, and this holds it again, so no value from outside the program can
+// end it in `cast<char>`.
+unsafe fn Optional<Event> eventOf(const ref winseam_event e) {
+    if (e.kind == KIND_TEXT) {
+        Optional<char> c = try cast<char>(e.a);
+        match (c) {
+            case Some(value: v): { return Optional::Some(value: Event::Text(c: v)); }
+            case None: { return Optional::None; }
+        };
+    }
+    return Optional::Some(value: otherEventOf(e: e));
+}
+
+// A ring record of any other kind as an Event.
+unsafe fn Event otherEventOf(const ref winseam_event e) {
     int32 k = e.kind;
     if (k == KIND_KEY_DOWN) { return Event::KeyDown(key: keyOf(hid: e.a), mods: modsOf(n: e.b), repeat: e.c != 0); }
     if (k == KIND_KEY_UP) { return Event::KeyUp(key: keyOf(hid: e.a), mods: modsOf(n: e.b)); }
-    if (k == KIND_TEXT) { return Event::Text(c: cast<char>(cast<uint32>(e.a))); }
     if (k == KIND_POINTER_MOVE) { return Event::PointerMove(pointer: pointerOf(e: e), dx: e.dx, dy: e.dy); }
     if (k == KIND_POINTER_DOWN) {
         return Event::PointerDown(pointer: pointerOf(e: e), button: buttonOf(n: e.a), mods: modsOf(n: e.b));
@@ -597,12 +610,19 @@ type resource Window {
     // Take the system's pending events into the queue (every open window's, natively). Headless, nothing.
     public unsafe fn void pump() { if (this.seam != null) { pumpWindow(window: this.seam); } }
 
-    // The next event and its time (`TimedEvent`), oldest first; None when the queue is empty.
+    // The next event and its time (`TimedEvent`), oldest first; None when the queue is empty. A record that is no event
+    // (WIN-27) is passed over.
     public unsafe fn Optional<TimedEvent> pollEvent() {
         if (this.seam == null) { return Optional::None; }
         winseam_event e = winseam_event.zero();
-        if (nextEvent(window: this.seam, into: cast<UnsafePtr>(addr(of: e))) == 0) { return Optional::None; }
-        return Optional::Some(value: TimedEvent.of(event: eventOf(e: e), at: Instant.of(rawNanos: e.at)));
+        while (nextEvent(window: this.seam, into: cast<UnsafePtr>(addr(of: e))) != 0) {
+            Optional<Event> made = eventOf(e: e);
+            match (made) {
+                case Some(value: v): { return Optional::Some(value: TimedEvent.of(event: v, at: Instant.of(rawNanos: e.at))); }
+                case None: { }
+            };
+        }
+        return Optional::None;
     }
 
     // An event into the queue as if the system had sent it at `at`: coalesced like one, and moving what is held like one,

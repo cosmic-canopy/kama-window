@@ -92,12 +92,14 @@ mergeInto(LibraryManager.library, {
 
     // The codepoint a keydown types, or 0: its `key` when that is one printable character, typed with neither Control
     // nor Meta unless AltGraph made it (so Ctrl+S types nothing, and AltGr+E types €). A dead key and an IME's are not
-    // text here (WIN-5).
+    // text here (WIN-5). A `key` that is a lone surrogate, which a page's own event may carry, is no Unicode scalar value
+    // and types nothing (WIN-27).
     typed: function (e) {
       var k = e.key;
       if (typeof k !== 'string' || k.length === 0 || k.length > 2) return 0;
       var cp = k.codePointAt(0);
       if (String.fromCodePoint(cp) !== k) return 0;
+      if (cp >= 0xD800 && cp <= 0xDFFF) return 0;
       if (cp < 32 || cp === 127) return 0;
       var altGraph = e.getModifierState && e.getModifierState('AltGraph');
       if ((e.ctrlKey || e.metaKey) && !altGraph) return 0;

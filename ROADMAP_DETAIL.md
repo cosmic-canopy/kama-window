@@ -8,29 +8,6 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
-<a id="text-scalar"></a>
-## WIN-27: a text event's code point held to a Unicode scalar value
-
-A `Text` event's `char` comes from outside the program. Since kama 0.9.1023 (its KR-441) `cast<char>` traps, in every
-build, on a value that is no Unicode scalar value: a surrogate, U+D800 to U+DFFF, or a value past U+10FFFF. `eventOf`
-reads the seam's code point with one (`cast<char>(cast<uint32>(e.a))`), so a value the seam passes that is no scalar
-value ends the program. On the web the page's `typed()` passes a `key` that is one lone surrogate, since
-`String.fromCodePoint` gives it back unchanged, so a page's own `KeyboardEvent` with `key: '\uD800'` reaches the cast.
-Natively, GLFW on Windows turns a lone surrogate into 0, which it drops; its other platforms are WIN-12's to read.
-Found at kyoten's bump to kama 0.9.1026 (2026-11-22), by `@kama/graphics`' cube, whose web-size record grew 92 B for
-the check.
-
-Both ends hold it: the seam passes no value that is no scalar value (the page's `typed()`, and the C's `on_char`), and
-`eventOf` reads the code point with `try cast<char>`, so no value from outside can trap.
-
-**Decided: such a key types nothing** (the owner, 2026-11-22, (A): "I assume A is the production answer for WIN-27? if
-so we can go with that"). No `Text` event comes of it. Natively GLFW on Windows already drops a lone surrogate, so
-nothing is what every platform can give alike, where U+FFFD would be the web's alone; Rust's `char::from_u32` answers
-`None` for such a value; and a text field never gains a character the player did not type. The other answer was U+FFFD,
-the replacement character, as the browser's own `TextEncoder` writes one. Done: a page's key event with a lone
-surrogate makes no `Text` event in every browser, a code point that is no scalar value reaching the native seam makes
-none, and no program ends.
-
 <a id="retire-driver"></a>
 ## WIN-24: the driver retired
 

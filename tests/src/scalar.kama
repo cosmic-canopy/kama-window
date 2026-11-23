@@ -1,0 +1,156 @@
+// WIN-27: a key whose code point is no Unicode scalar value (a surrogate, U+D800 to U+DFFF, or a value past U+10FFFF)
+// types nothing, and no program ends. A `Text` event's `char` comes from outside the program, and since kama 0.9.1023
+// `cast<char>` traps on such a value.
+//
+// Both ends hold it, and each is held here on its own, so a case notices either end missing:
+// - **the seam passes none.** Natively an input method's WM_UNICHAR, which GLFW 3.5.1 hands to the char callback
+//   unchecked (WM_CHAR joins surrogates first), read from the window's ring in C before the program reads it; on the
+//   web the page's `typed`, which reads a keydown's `key`, called directly;
+// - **`eventOf` reads none:** a record of such a value put into the ring past the seam is skipped, and the next event
+//   comes out.
+//
+// And the whole way, a system message natively and a page's own key event on the web, a scalar value past the Basic
+// Multilingual Plane still types, so neither end is too broad.
+
+import {
+    core::println, core::env::envOr,
+    std::time::monotonicNow,
+    Tally, quietly, drained, expectDrained,
+    window::Window, window::WindowError, window::Event, window::NativeWindow,
+};
+export { scalarSystem, webScalarCases };
+
+extern "hooks.h";
+extern fn int32 windowtests_win32();
+extern fn void windowtests_shown_next(int32 shown);
+extern fn int32 windowtests_send_unichar(UnsafePtr hwnd, uint32 codepoint);
+extern fn int32 windowtests_unichar_ring(UnsafePtr hwnd, uint32 codepoint, UnsafePtr<int32> first);
+extern fn int32 windowtests_post_text(UnsafePtr hwnd, int32 value);
+extern fn void windowtests_focus(UnsafeConstPtr<cchar> sel);
+extern fn int32 windowtests_typed(int32 hi, int32 lo);
+extern fn int32 windowtests_key_units(UnsafeConstPtr<cchar> sel, UnsafeConstPtr<cchar> type, UnsafeConstPtr<cchar> code,
+                                      int32 hi, int32 lo);
+extern fn int32 windowtests_put_text(UnsafeConstPtr<cchar> sel, int32 value);
+
+// The seam's own end, natively: WM_UNICHAR with `cp`, then the window's ring read in C. `want` Text records, the first
+// of value `first` when there is one.
+@compileFor(!ARCH_WASM32)
+unsafe fn void ringHolds(ref Tally t, UnsafePtr hwnd, uint32 cp, int32 want, int32 wantFirst, const ref string name) {
+    int32 first = 0;
+    int32 texts = windowtests_unichar_ring(hwnd: hwnd, codepoint: cp, first: addr(of: first));
+    if (texts == want && first == wantFirst) { t.verdict(name: name, why: ""); }
+    else { t.verdict(name: name, why: "${texts} Text records in the ring, the first ${first}"); }
+}
+
+@compileFor(ARCH_WASM32)
+unsafe fn void scalarSystem(ref Tally t) { }
+
+// Natively, on a hidden system window driven by Win32 messages.
+@compileFor(!ARCH_WASM32)
+unsafe fn void scalarSystem(ref Tally t) {
+    string skip = envOr(name: "KAMA_WINDOW_NO_DISPLAY", dflt: "");
+    if (!skip.isEmpty()) { println(s: "skip the scalar values on a system window (KAMA_WINDOW_NO_DISPLAY is set)"); return; }
+    if (windowtests_win32() != 1) { println(s: "skip the scalar values on a system window: only Win32 sends them"); return; }
+    windowtests_shown_next(shown: 0);
+    Result<Window, WindowError> opened = Window.openWith(title: "@kama/window scalar values", width: 120, height: 80,
+                                                         options: quietly());
+    windowtests_shown_next(shown: 1);
+    Window w = match (give opened) {
+        case Ok(value: v): give v;
+        case Err(error: e): {
+            string why = e.message();
+            t.verdict(name: "a system window for the scalar values", why: why);
+            return;
+        }
+    };
+    w.pump();
+    string ignored = drained(w: w);
+    NativeWindow n = w.nativeHandle();
+    UnsafePtr hwnd = n.window();
+
+    ringHolds(t: t, hwnd: hwnd, cp: 55296, want: 0, wantFirst: 0,
+              name: "WM_UNICHAR's lone high surrogate puts no Text record in the ring");
+    ringHolds(t: t, hwnd: hwnd, cp: 57343, want: 0, wantFirst: 0,
+              name: "nor its lone low surrogate");
+    ringHolds(t: t, hwnd: hwnd, cp: 1114112, want: 0, wantFirst: 0,
+              name: "nor a value one past U+10FFFF");
+    ringHolds(t: t, hwnd: hwnd, cp: 4294967295, want: 0, wantFirst: 0,
+              name: "nor the largest value WM_UNICHAR carries");
+    ringHolds(t: t, hwnd: hwnd, cp: 1114111, want: 1, wantFirst: 1114111,
+              name: "and U+10FFFF, the last scalar value, puts its Text record in the ring");
+    ringHolds(t: t, hwnd: hwnd, cp: 57344, want: 1, wantFirst: 57344,
+              name: "and so does U+E000, the first value past the surrogates");
+
+    windowtests_send_unichar(hwnd: hwnd, codepoint: 55296);
+    windowtests_send_unichar(hwnd: hwnd, codepoint: 1114112);
+    windowtests_send_unichar(hwnd: hwnd, codepoint: 97);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a surrogate and a value past U+10FFFF by WM_UNICHAR type nothing, and the program goes on",
+                  want: "Text 97");
+    windowtests_send_unichar(hwnd: hwnd, codepoint: 128512);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a scalar value past the Basic Multilingual Plane by WM_UNICHAR types", want: "Text 128512");
+
+    windowtests_post_text(hwnd: hwnd, value: 55296);
+    windowtests_post_text(hwnd: hwnd, value: 1114112);
+    windowtests_post_text(hwnd: hwnd, value: -1);
+    w.post(event: Event::Text(c: 'b'), at: monotonicNow());
+    expectDrained(t: t, w: w, name: "a Text record in the ring that is no scalar value is skipped, and the next event comes out",
+                  want: "Text 98");
+}
+
+// What the page's `typed` reads from a keydown whose `key` is `hi` (and `lo`, 0 for none) as UTF-16 code units.
+@compileFor(ARCH_WASM32)
+unsafe fn void typedIs(ref Tally t, int32 hi, int32 lo, int32 want, const ref string name) {
+    int32 got = windowtests_typed(hi: hi, lo: lo);
+    if (got == want) { t.verdict(name: name, why: ""); }
+    else { t.verdict(name: name, why: "typed ${got}, not ${want}"); }
+}
+
+// A keydown and its keyup on the canvas whose `key` is those code units, then what the window made of them.
+@compileFor(ARCH_WASM32)
+unsafe fn void keyedIs(ref Tally t, ref Window w, int32 hi, int32 lo, const ref string want, const ref string name) {
+    string canvas = "#canvas";
+    string down = "keydown";
+    string up = "keyup";
+    string code = "KeyA";
+    windowtests_key_units(sel: canvas.cstr(), type: down.cstr(), code: code.cstr(), hi: hi, lo: lo);
+    windowtests_key_units(sel: canvas.cstr(), type: up.cstr(), code: code.cstr(), hi: hi, lo: lo);
+    w.pump();
+    expectDrained(t: t, w: w, name: name, want: want);
+}
+
+@compileFor(!ARCH_WASM32)
+unsafe fn void webScalarCases(ref Tally t, ref Window w) { }
+
+// In a browser, on the page's canvas, which has the focus.
+@compileFor(ARCH_WASM32)
+unsafe fn void webScalarCases(ref Tally t, ref Window w) {
+    typedIs(t: t, hi: 55296, lo: 0, want: 0, name: "the page types nothing for a key that is a lone high surrogate");
+    typedIs(t: t, hi: 56320, lo: 0, want: 0, name: "nor for one that is a lone low surrogate");
+    typedIs(t: t, hi: 55357, lo: 56832, want: 128512, name: "and types a surrogate pair's scalar value");
+
+    string canvas = "#canvas";
+    windowtests_focus(sel: canvas.cstr());
+    w.pump();
+    string ignored = drained(w: w);
+    keyedIs(t: t, w: w, hi: 55296, lo: 0, want: "KeyDown 4 0 false; KeyUp 4 0",
+            name: "a page's key event whose key is a lone surrogate gives its key and types nothing");
+    keyedIs(t: t, w: w, hi: 56320, lo: 0, want: "KeyDown 4 0 false; KeyUp 4 0", name: "a lone low surrogate too");
+    keyedIs(t: t, w: w, hi: 55357, lo: 56832, want: "KeyDown 4 0 false; Text 128512; KeyUp 4 0",
+            name: "and a surrogate pair types its scalar value past the Basic Multilingual Plane");
+
+    windowtests_put_text(sel: canvas.cstr(), value: 55296);
+    windowtests_put_text(sel: canvas.cstr(), value: 1114112);
+    windowtests_put_text(sel: canvas.cstr(), value: -1);
+    windowtests_put_text(sel: canvas.cstr(), value: 98);
+    w.pump();
+    expectDrained(t: t, w: w, name: "a Text record in the page's queue that is no scalar value is skipped, and the next comes out",
+                  want: "Text 98");
+
+    // The focus back where the key cases left it, the page's field, for the pointer cases after.
+    string field = "#field";
+    windowtests_focus(sel: field.cstr());
+    w.pump();
+    string left = drained(w: w);
+}

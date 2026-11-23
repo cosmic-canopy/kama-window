@@ -35,6 +35,14 @@ int32_t windowtests_send_char(void *hwnd, int32_t codepoint);
 int32_t windowtests_send_mouse_move(void *hwnd, int32_t x, int32_t y);
 int32_t windowtests_send_wheel(void *hwnd, int32_t delta);
 int32_t windowtests_send_close(void *hwnd);
+// WIN-27: a code point that is no Unicode scalar value. WM_UNICHAR is what an input method may send, and GLFW 3.5.1 hands
+// its value to the char callback unchecked, where WM_CHAR joins surrogates first. 1 when sent; -1 off Windows.
+int32_t windowtests_send_unichar(void *hwnd, uint32_t codepoint);
+// The seam's own end, read past `eventOf`: sends WM_UNICHAR, then takes every record from the window's ring in C, before
+// the program reads one. The count of Text records, and the first one's value in `*first`; -1 off Windows.
+int32_t windowtests_unichar_ring(void *hwnd, uint32_t codepoint, int32_t *first);
+// `eventOf`'s own end, past the seam's: a Text record of `value` posted into the window's ring as it is. -1 off Windows.
+int32_t windowtests_post_text(void *hwnd, int32_t value);
 
 // 1 when the C string at `p` is `s`.
 int32_t windowtests_cstr_is(const void *p, const char *s);
@@ -70,6 +78,11 @@ int32_t windowtests_mapping_known(const char *guid);
 int32_t windowtests_in_browser(void);
 int32_t windowtests_key(const char *sel, const char *type, const char *code, const char *key, int32_t mods,
                         int32_t repeat);
+// WIN-27: a key whose `key` is UTF-16 code units (`lo` 0 for one), which may be a lone surrogate; what the page's `typed`
+// reads from such a keydown; and a Text record of `value` put into the window's queue past `typed`.
+int32_t windowtests_key_units(const char *sel, const char *type, const char *code, int32_t hi, int32_t lo);
+int32_t windowtests_typed(int32_t hi, int32_t lo);
+int32_t windowtests_put_text(const char *sel, int32_t value);
 int32_t windowtests_pointer(const char *sel, const char *type, int32_t id, int32_t kind, double x, double y,
                             int32_t button, int32_t buttons, float pressure, float tilt_x, float tilt_y, float twist,
                             float width, float height, int32_t primary);

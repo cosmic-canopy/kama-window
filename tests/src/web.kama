@@ -13,7 +13,7 @@ file @compileFor(ARCH_WASM32);
 import {
     core::println, core::env::args, core::env::Args,
     std::app::App, std::app::Lifecycle, std::app::run, std::app::Pace, std::app::quit,
-    Tally, describe, quietly, drained, expectDrained, summary, webPadCases, webTimeCases,
+    Tally, describe, quietly, drained, expectDrained, summary, webPadCases, webTimeCases, webScalarCases,
     window::Window, window::WindowError, window::WindowOptions, window::Event, window::Pointer, window::CursorMode,
     window::Size, window::NativeWindow, window::NativeKind,
     window::TimedEvent,
@@ -653,6 +653,7 @@ unsafe fn void webWindow(ref Tally t) {
     t.verdict(name: "in a browser, a window opens on the page's #canvas", why: "");
     openedCases(t: t, w: w);
     keys(t: t, w: w);
+    webScalarCases(t: t, w: w);
     pointers(t: t, w: w);
     cursor(t: t, w: w);
     webPadCases(t: t, w: w);

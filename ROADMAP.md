@@ -21,12 +21,6 @@ a page can do with a canvas, a program can do with a window on every platform.
 |---|---|---|
 | WIN-24 | **The driver retired**: trusted input and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
 
-## NEXT
-
-| id | item | why |
-|---|---|---|
-| WIN-27 | **A text event's code point held to a Unicode scalar value**: a lone surrogate from a page's own key event ends the program since kama 0.9.1023's `cast<char>` | [detail](ROADMAP_DETAIL.md#text-scalar) |
-
 ## LATER: the rest of the browser's platform APIs, and every platform
 
 | id | item | why |

@@ -5,6 +5,14 @@ package follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+- **Fixed: a key whose code point is no Unicode scalar value ended the program** (WIN-27, 2026-11-22, kama 0.9.1027).
+  Since kama 0.9.1023 `cast<char>` traps on a surrogate or a value past U+10FFFF (its KR-441), and a `Text` event's
+  code point was read with one. A page's own key event can carry a `key` that is a lone surrogate, and natively GLFW
+  3.5.1 hands an input method's `WM_UNICHAR` value on unchecked, so either ended the program. Such a key now types
+  nothing, on every backend, as the owner decided: the page's `typed` and the native char callback pass no such value,
+  and the ring's reader takes one with `try cast<char>` and passes it over, so no value from outside can end a program
+  there. A program needs no change. `tests/` gains `scalar.kama`, each end held alone: 9 cases natively, 7 in each
+  browser.
 - **Each event's time** (WIN-26, 2026-11-21, kama 0.9.978), for kyoten's input, which splits a frame's input across the
   simulation steps it owes by each event's time (its `docs/design/input.md`, 2026-11-21). **Breaking:**
   `pollEvent()` hands back `Optional<TimedEvent>`, a plain value of `event` and `at` (an `Instant` on kama's monotonic

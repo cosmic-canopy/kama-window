@@ -1093,7 +1093,10 @@ static void on_key(GLFWwindow *g, int key, int scancode, int action, int mods) {
     else if (action == GLFW_RELEASE) push_simple(w, WINSEAM_KEY_UP, hid, mods_of(mods), 0, at);
 }
 
+// A code point that is no Unicode scalar value (a surrogate, or past U+10FFFF) types nothing (WIN-27). GLFW 3.5.1 joins
+// WM_CHAR's surrogates, but hands WM_UNICHAR's value, which an input method may send, to this callback unchecked.
 static void on_char(GLFWwindow *g, unsigned int codepoint) {
+    if ((codepoint >= 0xD800u && codepoint <= 0xDFFFu) || codepoint > 0x10FFFFu) return;
     winseam_window *w = of(g);
     push_simple(w, WINSEAM_TEXT, (int32_t)codepoint, 0, 0, callback_time(w));
 }

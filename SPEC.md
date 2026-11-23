@@ -165,7 +165,7 @@ license; without it, pads are read through XInput.
 |---|---|
 | `KeyDown(key, mods, repeat)` | the physical key, the modifier bits, and whether it is a repeat: the key was already held |
 | `KeyUp(key, mods)` | |
-| `Text(c)` | one codepoint of typed text |
+| `Text(c)` | one codepoint of typed text, a Unicode scalar value: a key whose code point is none (a lone surrogate, or past U+10FFFF) types nothing, on every backend (WIN-27) |
 | `PointerMove(pointer, dx, dy)` | the pointer, its position logical, and the motion; while locked, the position means nothing and `dx`, `dy` are raw |
 | `PointerDown(pointer, button, mods)` | a button pressed: a mouse's, a touch contact (`Left`), a pen's tip (`Left`), barrel (`Right`) or eraser |
 | `PointerUp(pointer, button, mods)` | |
@@ -283,6 +283,9 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 - **Pointers, natively: a mouse alone.** GLFW reports no touch or pen (WIN-11): the mouse is pointer 1, primary, one
   unit across, its enter and leave from GLFW's cursor-enter callback.
+- **Text, natively: GLFW's char callback.** GLFW 3.5.1 joins a `WM_CHAR` surrogate pair and drops a lone one, but hands
+  `WM_UNICHAR`'s value, which an input method may send, on unchecked; the seam passes no value that is no Unicode
+  scalar value, so such a key types nothing, as on the web.
 - **The web:**
   - **Keys and pointers are the canvas's while it has the focus.** Keys typed in the page's text field beside it are
     the page's; a pointer down on the canvas focuses it, and holds the pointer until its up (pointer capture), as a
@@ -293,7 +296,8 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     `Key` does not name is left to the page. The browser keeps the few chords no page can take (Ctrl+W, Ctrl+T), and
     keyboard page zoom does not work while the canvas has the focus.
   - **`Text` comes from a keydown's `key`:** one printable character, typed with neither Control nor Meta unless
-    AltGraph made it; a dead key and an IME's types nothing yet (WIN-5).
+    AltGraph made it; a dead key and an IME's types nothing yet (WIN-5). A `key` that is a lone surrogate, which a
+    page's own event can carry, types nothing.
   - **Escape while locked is the browser's:** it gives the lock back, and the program sees no Escape.
   - **A tab switch while locked:** the browser gives the lock back before the blur, so `PointerLock(false)` comes
     before the focus change's ups, not after them as natively.
@@ -318,7 +322,7 @@ A window's system handles, holding its native record. It is a resource, and `Cop
 
 `tools/test.sh` is the gate. It runs:
 - `kama check` on the package and its tests;
-- `tests/`, one program, natively, debug and release: 304 cases. They cover:
+- `tests/`, one program, natively, debug and release: 313 cases. They cover:
   - the queue's order, coalescing and drops on a headless window;
   - what is held, on a headless window (`tests/src/held.kama`): the pairing of ups and downs, `Key::Unknown`, the
     release's order and bits, the room kept for ups in a full ring, a replayed stream, and `releaseHeld`;
@@ -336,6 +340,11 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     releases and lock at the call's time. Natively, on a hidden window driven by Win32 messages, a key, typed text, a
     mouse move, the wheel, a close request, a resize and a focus loss each at the moment its callback ran, the leave
     Windows posts after a move at the pump's, and a system pad at the moment the pump read it;
+  - the scalar values (`tests/src/scalar.kama`), on a hidden window driven by Win32 messages, each end alone: a
+    surrogate, a value one past U+10FFFF and the largest `WM_UNICHAR` carries put no `Text` record in the ring, read
+    in C before the program reads it, while U+10FFFF and U+E000 do; through the whole path, such a value types nothing
+    and the program goes on, and U+1F600 types; and a record of such a value put into the ring past the seam is
+    skipped, the next event coming out;
   - the names (`tests/src/names.kama`): every `Key`, `PadButton`, `PadAxis` and `PointerButton` read from its name and
     written as it, against a table of names and numbers in the test, a misspelling of each refused with the names
     listed, and a key's number refused in its name's place;
@@ -364,8 +373,8 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   refuses with no page.
 - the same program built for the web with its own page, `tests/web/shell.html`, in every browser `tools/browsers.mjs`
   finds (`KAMA_BROWSER` names one), headless and at a device scale of 1.5: under `kama run --target WASM --scale 1.5` in
-  Edge, Chrome as installed and the pinned Firefox, 311 cases, every one but the trusted input; and through
-  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 322. Beside the headless ones (`tests/src/web.kama`):
+  Edge, Chrome as installed and the pinned Firefox, 318 cases, every one but the trusted input; and through
+  `tools/webtest.mjs`, the driver, in the pinned Chrome for Testing, 329. Beside the headless ones (`tests/src/web.kama`):
   - the DOM key table, every key `Key` names against its DOM code, and none other (`tests/src/keys_web.kama`);
   - the browser's times (`tests/src/times.kama`): a key, its text, a pointer, two wheels coalesced, a size report, a
     blur and a focus each at its own time, two keys 30 ms apart keeping the gap, a page older than 4.3 s so a time fills both halves of
@@ -376,6 +385,10 @@ A window's system handles, holding its native record. It is a resource, and `Cop
     pointers in the content box, chorded buttons, a touch's cancel, a pen's fields, the wheel's units, the page's
     queue past its cap, the cursor, a canvas refused as a window twice, and what follows a size report (a new ratio, new
     pixels alone, a new CSS size); dispatched as DOM events, in-process;
+  - the scalar values (`tests/src/scalar.kama`), each end alone: the page's `typed` reading nothing from a `key` that
+    is a lone surrogate, high or low, and a pair's scalar value; a page's key event with such a `key` giving its down and
+    up and no `Text`, and a pair typing U+1F600; and a `Text` record of such a value put into the page's queue past
+    `typed` skipped, the next coming out;
   - `openIn`: its refusals, two canvases as two windows each with its own queue, a canvas's own tabindex kept, and a
     canvas the page lays out (`sizedByPage`);
   - the page's pads through a `navigator.getGamepads` of the tests' own (`tests/src/webpads.kama`): a slot by its

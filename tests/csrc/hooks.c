@@ -8,6 +8,8 @@
 #if defined(_WIN32)
 #include <windows.h>
 #include <GLFW/glfw3.h>
+#include "winseam.h"
+#include "kama_time.h"
 
 int32_t windowtests_is_window(void *hwnd) { return IsWindow((HWND)hwnd) ? 1 : 0; }
 int32_t windowtests_is_visible(void *hwnd) { return IsWindowVisible((HWND)hwnd) ? 1 : 0; }
@@ -51,6 +53,41 @@ int32_t windowtests_send_wheel(void *hwnd, int32_t delta) {
 }
 int32_t windowtests_send_close(void *hwnd) {
     SendMessageW((HWND)hwnd, WM_CLOSE, 0, 0);
+    return 1;
+}
+
+// WIN-27. A window's record is GLFW's user pointer (winseam.c's `of`), and its GLFW window the HWND's "GLFW" property.
+static winseam_window *seam_of(void *hwnd) {
+    GLFWwindow *g = (GLFWwindow *)GetPropW((HWND)hwnd, L"GLFW");
+    return g == NULL ? NULL : (winseam_window *)glfwGetWindowUserPointer(g);
+}
+int32_t windowtests_send_unichar(void *hwnd, uint32_t codepoint) {
+    SendMessageW((HWND)hwnd, WM_UNICHAR, (WPARAM)codepoint, 0);
+    return 1;
+}
+int32_t windowtests_unichar_ring(void *hwnd, uint32_t codepoint, int32_t *first) {
+    winseam_window *w = seam_of(hwnd);
+    *first = 0;
+    if (w == NULL) return -1;
+    SendMessageW((HWND)hwnd, WM_UNICHAR, (WPARAM)codepoint, 0);
+    winseam_event e;
+    int32_t texts = 0;
+    while (winseam_next(w, &e)) {
+        if (e.kind != WINSEAM_TEXT) continue;
+        if (texts == 0) *first = e.a;
+        texts += 1;
+    }
+    return texts;
+}
+int32_t windowtests_post_text(void *hwnd, int32_t value) {
+    winseam_window *w = seam_of(hwnd);
+    if (w == NULL) return -1;
+    winseam_event e;
+    memset(&e, 0, sizeof e);
+    e.kind = WINSEAM_TEXT;
+    e.a = value;
+    e.at = kama_now_mono_ns();
+    winseam_post(w, &e);
     return 1;
 }
 
@@ -194,6 +231,11 @@ int32_t windowtests_send_char(void *hwnd, int32_t codepoint) { (void)hwnd; (void
 int32_t windowtests_send_mouse_move(void *hwnd, int32_t x, int32_t y) { (void)hwnd; (void)x; (void)y; return -1; }
 int32_t windowtests_send_wheel(void *hwnd, int32_t delta) { (void)hwnd; (void)delta; return -1; }
 int32_t windowtests_send_close(void *hwnd) { (void)hwnd; return -1; }
+int32_t windowtests_send_unichar(void *hwnd, uint32_t codepoint) { (void)hwnd; (void)codepoint; return -1; }
+int32_t windowtests_unichar_ring(void *hwnd, uint32_t codepoint, int32_t *first) {
+    (void)hwnd; (void)codepoint; *first = 0; return -1;
+}
+int32_t windowtests_post_text(void *hwnd, int32_t value) { (void)hwnd; (void)value; return -1; }
 uint32_t windowtests_virtual_pad(const char *name, int32_t trigger_motors) { (void)name; (void)trigger_motors; return 0; }
 int32_t windowtests_virtual_button(uint32_t id, int32_t button, int32_t down) { (void)id; (void)button; (void)down; return 0; }
 int32_t windowtests_virtual_axis(uint32_t id, int32_t axis, int32_t value) { (void)id; (void)axis; (void)value; return 0; }

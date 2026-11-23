@@ -6,10 +6,22 @@
 // package reads is quoted, as the driver's acknowledgement and the fake pads' Gamepad keys are, and these are the file's
 // own, which tools/closure-names.mjs lets Closure rename:
 // closure-own: el at kinds sizes windows windowtestsPads windowtestsRecord count motors ms
+// closure-own: units winOf typed put TEXT
 mergeInto(LibraryManager.library, {
-  $WT__deps: ['$UTF8ToString'],
+  $WT__deps: ['$UTF8ToString', '$WinSeam'],
   $WT: {
     el: function (p) { return document.querySelector(UTF8ToString(p)); },
+    // A string of one or two UTF-16 code units (`lo` 0 for one), which a kama string, UTF-8, cannot carry when a unit is
+    // a lone surrogate (WIN-27).
+    units: function (hi, lo) { return lo === 0 ? String.fromCharCode(hi) : String.fromCharCode(hi, lo); },
+    // The package's window on `el`, or null.
+    winOf: function (el) {
+      for (var i = 0; i < WinSeam.windows.length; i++) {
+        var win = WinSeam.windows[i];
+        if (win && win.canvas === el) return win;
+      }
+      return null;
+    },
     // x, y from the element's content box, as the window reports them, to the page's client coordinates.
     at: function (el, x, y) {
       var b = el.getBoundingClientRect(), cs = getComputedStyle(el);
@@ -32,6 +44,32 @@ mergeInto(LibraryManager.library, {
       modifierAltGraph: (mods & 64) !== 0, bubbles: true, cancelable: true, composed: true,
     });
     return WT.el(sel).dispatchEvent(e) ? 1 : 0;
+  },
+
+  // WIN-27: a key event whose `key` is `hi` and `lo` as UTF-16 code units, which a page's own event may make a lone
+  // surrogate, with no modifier.
+  windowtests_key_units__deps: ['$WT', '$UTF8ToString'],
+  windowtests_key_units: function (sel, type, code, hi, lo) {
+    var e = new KeyboardEvent(UTF8ToString(type), {
+      code: UTF8ToString(code), key: WT.units(hi, lo), bubbles: true, cancelable: true, composed: true,
+    });
+    return WT.el(sel).dispatchEvent(e) ? 1 : 0;
+  },
+
+  // WIN-27, the page's own end alone: what the package's `typed` reads from a keydown whose `key` is those code units.
+  windowtests_typed__deps: ['$WinSeam', '$WT'],
+  windowtests_typed: function (hi, lo) {
+    return WinSeam.typed(new KeyboardEvent('keydown', { code: 'KeyA', key: WT.units(hi, lo) }));
+  },
+
+  // WIN-27, `eventOf`'s own end alone: a Text record of `value` put into the window on `sel`'s queue as it is, past the
+  // page's `typed`. 1 when the canvas is a window.
+  windowtests_put_text__deps: ['$WinSeam', '$WT'],
+  windowtests_put_text: function (sel, value) {
+    var win = WT.winOf(WT.el(sel));
+    if (win === null) return 0;
+    WinSeam.put(win, { kind: WinSeam.TEXT, a: value, at: performance.now() });
+    return 1;
   },
 
   windowtests_pointer__deps: ['$WT', '$UTF8ToString'],

@@ -9,6 +9,7 @@ import {
     window::ScrollUnit, window::Mods, window::Size, window::NativeKind, window::NativeWindow,
     keyTable, buttonTable, nativeHandles, systemHandles, quietly, openOptions, focusCases, heldCases, heldSystem,
     pointerCases, mouseAt, webWindow, webFinish, padCases, systemPadCases, noSystemPads, nameCases, timeCases, timeSystem,
+    scalarSystem,
     std::time::monotonicNow, window::TimedEvent,
 };
 
@@ -277,6 +278,7 @@ unsafe fn uint8 appMain() {
     nativeHandles(t: t);
     heldSystem(t: t);
     timeSystem(t: t);
+    scalarSystem(t: t);
     openOptions(t: t);
     if (focusCases(t: t)) {
         systemWindow(t: t);
