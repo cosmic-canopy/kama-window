@@ -10,7 +10,7 @@
 > **`WIN-<n>` is a permanent id, not a position.** It is assigned once, from the counter below, which the same edit
 > bumps; it is never reused or renumbered, and a shipped row's id retires with it.
 
-**Next id: WIN-28**
+**Next id: WIN-29**
 
 **The goal is the browser's platform APIs, native at parity** ([AGENTS.window.md](AGENTS.window.md#what-this-is)): what
 a page can do with a canvas, a program can do with a window on every platform.
@@ -20,6 +20,12 @@ a page can do with a canvas, a program can do with a window on every platform.
 | id | item | why |
 |---|---|---|
 | WIN-24 | **The driver retired**: trusted input and the pinned Chrome for Testing under `kama run`, once kama gives them | [detail](ROADMAP_DETAIL.md#retire-driver) |
+
+## NEXT
+
+| id | item | why |
+|---|---|---|
+| WIN-28 | **A pad reading's time**: `padAt(slot:)`, the time of the reading `pad(slot:)` shows, the one its button events carry, so a stick and a button read together split alike | [detail](ROADMAP_DETAIL.md#pad-time) |
 
 ## LATER: the rest of the browser's platform APIs, and every platform
 
