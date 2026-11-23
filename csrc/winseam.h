@@ -152,6 +152,9 @@ void winseam_pad_sample(winseam_window *window, int32_t slot, const winseam_pad 
 // The pad in `slot` as the consumer reads it: connected once its connect is queued; neutral while the window is unfocused
 // (unless pads are read in the background) and after a release until its next sample; all 0 for an empty slot.
 void winseam_pad_read(winseam_window *window, int32_t slot, winseam_pad *into);
+// The time of the reading `winseam_pad_read` shows (WIN-28): the time its events carry, held to the pumps and in order as
+// they are; a release's, from which it reads neutral; 0 for a slot no reading has reached, or one outside the slots.
+uint64_t winseam_pad_at(winseam_window *window, int32_t slot);
 // Pads read while the window is unfocused (1) or neutral then (0, the default). Turned off while unfocused, what the pads
 // hold is released at once.
 void winseam_set_pads_when_unfocused(winseam_window *window, int32_t on);

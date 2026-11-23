@@ -229,6 +229,12 @@ system window reads the system's pads once and hands each slot to every open sys
   buttons' travel (`value(button:)`, 0 to 1) and 4 axes (`axis(axis:)`, -1 to 1, right and down positive), as the
   device reports them, with no dead zone: shaping a value (a dead zone, drift, a curve) is the consumer's. A button is
   `pressed` at `Gamepad::PressedAt`, 30 of 255 of its travel, on every backend, whatever a browser calls pressed.
+- **`padAt(slot:) -> Instant`:** when the reading `pad(slot:)` shows was read, the time its events carry, held to the
+  pumps and in order as they are, so a stick and a button read together share one time (WIN-28). Natively a system pad
+  is read at every pump, an empty slot too, at the pump's moment; on the web at its `Gamepad.timestamp`. A reading that
+  moves only a stick or a trigger makes no event and still moves it. A posted pad's is `postPad`'s `at`, and a
+  release's (a focus loss, `releaseHeld`, `setPadsWhenUnfocused(on: false)`) the release's, from which it reads
+  neutral. A slot no reading has reached, or one outside 0 to 15, is at the clock's start, `rawNanos` 0.
 - **`PadButton`** names the face buttons by their place (`South`, `East`, `West`, `North`), as `Key` names keys: Xbox's
   A, PlayStation's Cross and Nintendo's B are each `South`. Then `LeftShoulder`, `RightShoulder`, `LeftTrigger`,
   `RightTrigger`, `Back`, `Start`, `LeftStick`, `RightStick`, `DpadUp`, `DpadDown`, `DpadLeft`, `DpadRight` and `Guide`,
@@ -336,10 +342,13 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - the times (`tests/src/times.kama`), on a headless window: a posted time kept as given; the newest sample's time
     for a coalesced move or scroll and the last for a resize; a full ring's events each at their own and its
     `Dropped` at the first it counts; the up the ring keeps before its `Dropped`; a focus loss's releases, a touch's
-    cancel and the lock it gives back at the `Focus`'s time; a posted pad's events at its sample's; and a call's
-    releases and lock at the call's time. Natively, on a hidden window driven by Win32 messages, a key, typed text, a
+    cancel and the lock it gives back at the `Focus`'s time; a posted pad's events at its sample's; a pad's reading at
+    its events' time (`padAt`), a reading that moves only a stick too, a release's at the release's, a posted one
+    after a call at its own, and a slot no reading reached, or past the slots, at 0; and a call's releases and lock at
+    the call's time. Natively, on a hidden window driven by Win32 messages, a key, typed text, a
     mouse move, the wheel, a close request, a resize and a focus loss each at the moment its callback ran, the leave
-    Windows posts after a move at the pump's, and a system pad at the moment the pump read it;
+    Windows posts after a move at the pump's, and a system pad, its reading and an empty slot's at the moment the pump
+    read it, its events at exactly its reading's;
   - the scalar values (`tests/src/scalar.kama`), on a hidden window driven by Win32 messages, each end alone: a
     surrogate, a value one past U+10FFFF and the largest `WM_UNICHAR` carries put no `Text` record in the ring, read
     in C before the program reads it, while U+10FFFF and U+E000 do; through the whole path, such a value types nothing
@@ -379,7 +388,8 @@ A window's system handles, holding its native record. It is a resource, and `Cop
   - the browser's times (`tests/src/times.kama`): a key, its text, a pointer, two wheels coalesced, a size report, a
     blur and a focus each at its own time, two keys 30 ms apart keeping the gap, a page older than 4.3 s so a time fills both halves of
     the record, an event taken after a call no earlier than the call, and a pad's `Gamepad.timestamp`: kept between
-    the pumps, held to the pump before when stale and to its pump when later, and raised to a key's taken before it;
+    the pumps, held to the pump before when stale and to its pump when later, and raised to a key's taken before it,
+    `padAt` with it, and a reading that moves only a stick at its own;
   - a window on `#canvas`: its sizes at a scale of 1.5, what it sets on the canvas and gives back at close, focus,
     keys and the defaults taken, text, the window's own repeat, a blur's release, the page's field kept apart,
     pointers in the content box, chorded buttons, a touch's cancel, a pen's fields, the wheel's units, the page's

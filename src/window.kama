@@ -30,7 +30,7 @@ import {
     window::native::KIND_RESIZE, window::native::KIND_SCALE_CHANGED, window::native::KIND_FOCUS,
     window::native::KIND_POINTER_LOCK, window::native::KIND_CLOSE_REQUESTED, window::native::KIND_DROPPED,
     window::native::KIND_PAD_CONNECTED, window::native::KIND_PAD_DISCONNECTED, window::native::KIND_PAD_DOWN,
-    window::native::KIND_PAD_UP, window::native::winseam_pad, window::native::padSample, window::native::padRead,
+    window::native::KIND_PAD_UP, window::native::winseam_pad, window::native::padSample, window::native::padRead, window::native::padAtOf,
     window::native::setPadsWhenUnfocused, window::native::padText, window::native::padNumber, window::native::padRumble, window::native::padRaw,
     window::native::addPadMappings,
     window::native::openWindow, window::native::headlessWindow, window::native::closeWindow,
@@ -658,6 +658,16 @@ type resource Window {
         g.buttons = p.buttons;
         g.axes = p.axes;
         return g;
+    }
+
+    // The time of the reading `pad(slot)` shows (WIN-28), on kama's monotonic clock: the time its events carry, held to
+    // the pumps and in order as they are, so a stick and a button read together share one time. Natively a system pad
+    // is read at each pump, at its moment; on the web at its `Gamepad.timestamp`. A posted pad's is `postPad`'s `at`, and
+    // a release's (a focus loss, `releaseHeld`) the release's, from which it reads neutral. A slot no reading has reached,
+    // or one outside 0 to 15, is at the clock's start (0).
+    public unsafe const fn Instant padAt(int32 slot) {
+        if (this.seam == null) { return Instant.of(rawNanos: 0ui64); }
+        return Instant.of(rawNanos: padAtOf(window: this.seam, slot: slot));
     }
 
     // A pad's sample into `slot` as if the system had read it at `at` (a test, a replay): compared with what the window

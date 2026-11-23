@@ -9,7 +9,8 @@ import {
     std::time::Instant, std::time::Duration, std::time::monotonicNow,
     Tally, describe, quietly, drained,
     window::Window, window::WindowError, window::Event, window::TimedEvent, window::Key, window::PointerButton,
-    window::Pointer, window::PointerKind, window::ScrollUnit, window::Gamepad, window::PadButton, window::CursorMode,
+    window::Pointer, window::PointerKind, window::ScrollUnit, window::Gamepad, window::PadButton, window::PadAxis,
+    window::CursorMode,
     window::NativeWindow, window::Size,
 };
 export { timeCases, timeSystem, webTimeCases };
@@ -112,6 +113,33 @@ unsafe fn void expectAllWithin(ref Tally t, ref Window w, const ref string name,
         };
     }
     if (why.isEmpty() && got != want) { why = "got `" + got + "`, not `" + want + "`"; }
+    t.verdict(name: name, why: why);
+}
+
+// WIN-28: the time of the reading `w.pad(slot:)` shows, which must be `want`.
+unsafe fn void expectPadAt(ref Tally t, ref Window w, int32 slot, const ref string name, Instant want) {
+    uint64 got = w.padAt(slot: slot).rawNanos;
+    uint64 wantNs = want.rawNanos;
+    string why = "";
+    if (got != wantNs) { why = "padAt ${got} ns, not ${wantNs}"; }
+    t.verdict(name: name, why: why);
+}
+
+// The same, from `from` to `to`, both included.
+unsafe fn void expectPadWithin(ref Tally t, ref Window w, int32 slot, const ref string name, Instant from, Instant to) {
+    uint64 got = w.padAt(slot: slot).rawNanos;
+    uint64 low = from.rawNanos;
+    uint64 high = to.rawNanos;
+    string why = "";
+    if (got < low || got > high) { why = "padAt ${got} ns, outside ${low} to ${high}"; }
+    t.verdict(name: name, why: why);
+}
+
+// No event left in the queue.
+unsafe fn void expectNoEvent(ref Tally t, ref Window w, const ref string name) {
+    string left = drained(w: w);
+    string why = "";
+    if (!left.isEmpty()) { why = "got `" + left + "`"; }
     t.verdict(name: name, why: why);
 }
 
@@ -223,6 +251,40 @@ unsafe fn void padTimes(ref Tally t) {
     expectAt(t: t, w: w, name: "a posted PadButtonDown, at its time", want: "PadButtonDown 3 3", wantAt: ms(n: 91));
 }
 
+// WIN-28: `padAt` is the time of the reading `pad` shows, the time its events carry: a posted sample's, one that moves
+// only a stick and makes no event, a posted pad event's, a focus loss's release (the pad then reads neutral), and an
+// emptied slot's. A slot no reading has reached, or one outside 0 to 15, is at the clock's start.
+unsafe fn void padReadingTimes(ref Tally t) {
+    Window w = Window.headless(width: 64, height: 64);
+    Instant start = Instant.of(rawNanos: 0ui64);
+    expectPadAt(t: t, w: w, slot: 6, name: "a slot no reading has reached is at the clock's start", want: start);
+    Gamepad g = Gamepad.neutral();
+    g.press(button: PadButton::South);
+    w.postPad(slot: 6, pad: g, at: ms(n: 100));
+    expectPadAt(t: t, w: w, slot: 6, name: "a posted sample's reading is at its time", want: ms(n: 100));
+    expectAt(t: t, w: w, name: "and its connect is at the same time", want: "PadConnected 6", wantAt: ms(n: 100));
+    expectAt(t: t, w: w, name: "and its down", want: "PadButtonDown 6 0", wantAt: ms(n: 100));
+    g.setAxis(axis: PadAxis::LeftX, value: 0.5);
+    w.postPad(slot: 6, pad: g, at: ms(n: 104));
+    expectNoEvent(t: t, w: w, name: "a sample that moves only a stick makes no event");
+    expectPadAt(t: t, w: w, slot: 6, name: "but its reading's time is the sample's", want: ms(n: 104));
+    Gamepad shown = w.pad(slot: 6);
+    if (shown.axis(axis: PadAxis::LeftX) == 0.5) { t.verdict(name: "and the reading is that sample", why: ""); }
+    else { t.verdict(name: "and the reading is that sample", why: "LeftX is not 0.5"); }
+    w.post(event: Event::PadButtonUp(slot: 6, button: PadButton::South), at: ms(n: 108));
+    expectPadAt(t: t, w: w, slot: 6, name: "a posted pad event's reading is at its time", want: ms(n: 108));
+    w.post(event: Event::Focus(focused: false), at: ms(n: 112));
+    expectPadAt(t: t, w: w, slot: 6, name: "a focus loss's release: the neutral it reads is at the Focus's time",
+                want: ms(n: 112));
+    w.postPad(slot: 6, pad: Gamepad.disconnected(), at: ms(n: 116));
+    expectPadAt(t: t, w: w, slot: 6, name: "an emptied slot's reading is at its disconnect's time", want: ms(n: 116));
+    expectPadAt(t: t, w: w, slot: 2, name: "another slot no reading has reached stays at the clock's start", want: start);
+    expectPadAt(t: t, w: w, slot: 16, name: "a slot outside 0 to 15 is at the clock's start", want: start);
+    expectPadAt(t: t, w: w, slot: -1, name: "and so is a negative one", want: start);
+    expectPadAt(t: t, w: w, slot: 1000000, name: "and one far past the last, read nowhere", want: start);
+    expectPadAt(t: t, w: w, slot: -1000000, name: "and one far below the first", want: start);
+}
+
 // What a call makes takes the call's time: `releaseHeld`'s ups, a headless cursor's lock, the pads let go when they stop
 // being read in the background.
 unsafe fn void callTimes(ref Tally t) {
@@ -247,12 +309,15 @@ unsafe fn void callTimes(ref Tally t) {
     Gamepad g = Gamepad.neutral();
     g.press(button: PadButton::West);
     w.postPad(slot: 4, pad: g, at: ms(n: 3));
+    expectPadAt(t: t, w: w, slot: 4, name: "a posted reading after a call keeps its own time, as its events do",
+                want: ms(n: 3));
     string ignored = drained(w: w);
     before = monotonicNow();
     w.setPadsWhenUnfocused(on: false);
     after = monotonicNow();
     expectWithin(t: t, w: w, name: "a pad let go as the background read stops, at the call's time", want: "PadButtonUp 4 2",
                  from: before, to: after, seen: seen);
+    expectPadAt(t: t, w: w, slot: 4, name: "and the neutral it then reads is at that up's time", want: seen);
 }
 
 // A full ring keeps a slot for a held key's up: an up arriving while it overflows goes before the trailing Dropped, which
@@ -294,6 +359,7 @@ unsafe fn void timeCases(ref Tally t) {
     droppedTime(t: t);
     focusReleaseTime(t: t);
     padTimes(t: t);
+    padReadingTimes(t: t);
     callTimes(t: t);
 }
 
@@ -369,8 +435,23 @@ unsafe fn void timeSystem(ref Tally t) {
     Instant padFrom = monotonicNow();
     w.pump();
     Instant padTo = monotonicNow();
+    // WIN-28: the reading is at the pump's moment, and its events at exactly the reading's time.
+    expectPadWithin(t: t, w: w, slot: 7, name: "a system pad's reading is at the moment the pump read it", from: padFrom,
+                    to: padTo);
+    expectPadWithin(t: t, w: w, slot: 9, name: "every pump reads every slot: an empty one is at that moment too",
+                    from: padFrom, to: padTo);
+    Instant padRead = w.padAt(slot: 7);
     expectAllWithin(t: t, w: w, name: "a system pad's events are at the moment the pump read it",
-                    want: "PadConnected 7; PadButtonDown 7 0", from: padFrom, to: padTo);
+                    want: "PadConnected 7; PadButtonDown 7 0", from: padRead, to: padRead);
+    padAxes[0] = 0.5;
+    winseam_system_pad(slot: 7, connected: 1, buttons: addr(of: padButtons[0]), axes: addr(of: padAxes[0]),
+                       name: padName.cstr(), vendor: 0, product: 0, serial: none.cstr(), id: none.cstr(), caps: 0);
+    Instant stickFrom = monotonicNow();
+    w.pump();
+    Instant stickTo = monotonicNow();
+    expectNoEvent(t: t, w: w, name: "a system reading that moves only a stick makes no event");
+    expectPadWithin(t: t, w: w, slot: 7, name: "but its reading is at the moment the pump read it", from: stickFrom,
+                    to: stickTo);
     winseam_system_pad(slot: 7, connected: 0, buttons: addr(of: padButtons[0]), axes: addr(of: padAxes[0]),
                        name: none.cstr(), vendor: 0, product: 0, serial: none.cstr(), id: none.cstr(), caps: 0);
     w.pump();
@@ -574,6 +655,7 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     Duration micro = Duration.fromMicros(us: 1);
     expectWithin(t: t, w: w, name: "a pad's down is at its Gamepad.timestamp", want: "PadButtonDown 5 3",
                  from: between + (-micro), to: between + micro, seen: seen);
+    expectPadAt(t: t, w: w, slot: 5, name: "and padAt is that reading's time, its down's", want: seen);
     Instant afterSecond = monotonicNow();
     buttons[3] = 0.0;
     windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
@@ -582,6 +664,7 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     w.pump();
     expectWithin(t: t, w: w, name: "a stale Gamepad.timestamp is held to the pump before", want: "PadButtonUp 5 3",
                  from: beforeSecond, to: afterSecond, seen: seen);
+    expectPadAt(t: t, w: w, slot: 5, name: "and so is padAt, as its up", want: seen);
 
     // A pad is read after the page's events in a pump, so a pad whose timestamp is earlier than a key taken before it
     // comes out at the key's time: the times run in the order the events come out.
@@ -601,6 +684,7 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     expectWithin(t: t, w: w, name: "its text", want: "Text 106", from: keyAt, to: keyAt, seen: seen);
     expectWithin(t: t, w: w, name: "a pad's down timestamped before the key comes out at the key's time",
                  want: "PadButtonDown 5 0", from: keyAt, to: keyAt, seen: seen);
+    expectPadAt(t: t, w: w, slot: 5, name: "and its reading's padAt is the key's time too", want: keyAt);
     int32 four = windowtests_key(sel: canvas.cstr(), type: up.cstr(), code: code.cstr(), key: key.cstr(), mods: 0, repeat: 0);
     w.pump();
     string keyLetGo = drained(w: w);
@@ -616,6 +700,19 @@ unsafe fn void webTimeCases(ref Tally t, ref Window w) {
     Instant futureTo = monotonicNow();
     expectAllWithin(t: t, w: w, name: "a Gamepad.timestamp later than the pump is held to the pump",
                     want: "PadButtonDown 5 1", from: futureFrom, to: futureTo);
+    expectPadWithin(t: t, w: w, slot: 5, name: "and so is padAt", from: futureFrom, to: futureTo);
+
+    // WIN-28: a reading that moves only a stick makes no event, and padAt is its Gamepad.timestamp.
+    Instant stickAt = monotonicNow();
+    waitMs(n: 3);
+    axes[2] = -0.75;
+    windowtests_web_pad(slot: 5, connected: 1, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
+                        axes: addr(of: axes[0]), naxes: 4, effects: 0);
+    windowtests_web_pad_at(slot: 5, ms: msOf(at: stickAt));
+    w.pump();
+    expectNoEvent(t: t, w: w, name: "a page's pad reading that moves only a stick makes no event");
+    expectPadWithin(t: t, w: w, slot: 5, name: "but padAt is its Gamepad.timestamp", from: stickAt + (-micro),
+                    to: stickAt + micro);
     windowtests_web_pad(slot: 5, connected: 0, standard: 1, id: id.cstr(), buttons: addr(of: buttons[0]), nbuttons: 17,
                         axes: addr(of: axes[0]), naxes: 4, effects: 0);
     w.pump();

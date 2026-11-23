@@ -8,23 +8,6 @@ how it was decided is the git log. `tools/check-roadmap.sh` holds every section 
 **The browser is the reference.** Each row is designed against the browser's own API first, and native implements the
 same `Event`s and methods. Where a platform cannot, the SPEC says so for that platform.
 
-<a id="pad-time"></a>
-## WIN-28: a pad reading's time
-
-Every event has its time (SPEC § Event), a pad's downs and ups the time of the reading that made them: on the web its
-`Gamepad.timestamp`, natively the pump's. A pad's sticks' and triggers' travel is state, read by `pad(slot:)`, which
-carries no time. So a program splitting a frame's input across the steps it owes by time, as kyoten does (its
-`docs/design/input.md` § Decided, 2026-11-21, question 1), would put a button and a stick read together in two steps:
-the button at the reading's time, the stick at the pump's.
-
-**Decided (A)** (kyoten's owner, 2026-11-23, at kyoten's forty-seventh session's start: "I assume option 1 is the
-production answer?"; kyoten's `docs/design/input.md` § Decided, the second part's question 3).
-`padAt(slot:) -> Instant` is the time of the reading `pad(slot:)` shows, the time its events carry, held to the pumps
-and in order as they are; a posted pad's is `postPad`'s `at`. Natively it is the pump's until WIN-19 reads SDL's stamp.
-The other answer was the program stamping a pad's state at the pump, a stopgap. Done: in every browser a page's pad read
-at a timestamp of its own reports that time through `padAt`, and natively and in a headless window a posted pad reports
-`postPad`'s; a button event and `padAt` agree for one reading.
-
 <a id="retire-driver"></a>
 ## WIN-24: the driver retired
 

@@ -38,6 +38,7 @@ typedef struct pad_view {
     uint32_t held;      // a bit per button the consumer has seen go down and not up
     int32_t stale;      // released since its last sample: it reads neutral until the next one
     int32_t rumbling;   // the rumbles this window started on it, stopped when its pads close: 1 dual, 2 trigger
+    uint64_t at;        // when what it reads was read (WIN-28): the sample's time, or the release's; 0 before either
 } pad_view;
 
 // A button is pressed at 30 of 255 of its travel or more, on every backend (WIN-4, decision 2a): XInput's trigger
@@ -284,11 +285,18 @@ static void pad_record(winseam_event *e, int32_t kind, int32_t slot, int32_t but
     e->at = at;
 }
 
+// A reading's time as its events will carry it: the system's no earlier than the record before it (WIN-26), so `padAt`
+// and the reading's events agree (WIN-28).
+static uint64_t reading_time(const winseam_window *w, uint64_t at) {
+    return (w->ordering && at < w->system_at) ? w->system_at : at;
+}
+
 // An up for each button the pad in `slot` holds, by number, at `at`; the ring owes each. The pad then reads neutral until
-// its next sample.
+// its next sample, from `at`.
 static void release_pad(winseam_window *w, int32_t slot, uint64_t at) {
     pad_view *v = &w->pads[slot];
     winseam_event e;
+    v->at = reading_time(w, at);
     for (int32_t b = 0; b < WINSEAM_PAD_BUTTONS; b++) {
         uint32_t bit = 1u << b;
         if ((v->held & bit) == 0) continue;
@@ -311,11 +319,12 @@ static void release_pads(winseam_window *w, uint64_t at) {
 // - then each button no longer pressed goes up, then each newly pressed goes down, each by number;
 // - while the window is closed to pads (decision 5) no button is pressed;
 // - a connect or a down counted into a drop was never seen, so the next sample makes it again.
-// Each event is at `at`, the sample's time.
+// Each event is at `at`, the sample's time, and so is the reading (`padAt`), whether or not it makes one.
 static void pad_take(winseam_window *w, int32_t slot, const winseam_pad *s, uint64_t at) {
     if (!slot_ok(slot)) return;
     pad_view *v = &w->pads[slot];
     winseam_event e;
+    v->at = reading_time(w, at);
     if (!s->connected) {
         memset(&v->raw, 0, sizeof v->raw);
         v->stale = 0;
@@ -369,6 +378,11 @@ void winseam_pad_read(winseam_window *w, int32_t slot, winseam_pad *into) {
     if (!pads_open(w) || v->stale) return;
     memcpy(into->buttons, v->raw.buttons, sizeof into->buttons);
     memcpy(into->axes, v->raw.axes, sizeof into->axes);
+}
+
+uint64_t winseam_pad_at(winseam_window *w, int32_t slot) {
+    if (!slot_ok(slot)) return 0;
+    return w->pads[slot].at;
 }
 
 void winseam_set_pads_when_unfocused(winseam_window *w, int32_t on) {
