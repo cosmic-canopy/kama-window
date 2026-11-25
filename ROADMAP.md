@@ -27,7 +27,7 @@ a page can do with a canvas, a program can do with a window on every platform.
 |---|---|---|
 | WIN-23 | **SDL's own switch from XInput to GameInput**: when an SDL release has it, the vendored SDL moves to it and the gamepads' stopgap goes | [detail](ROADMAP_DETAIL.md#sdl-gameinput-fix) |
 | WIN-22 | **A pad's motion sensors, touchpad and lights**: natively through SDL3, on the web only through WebHID | [detail](ROADMAP_DETAIL.md#pad-sensors) |
-| WIN-5 | **Text input with IME composition** | [detail](ROADMAP_DETAIL.md#ime) |
+| WIN-5 | **Text input turned on and off**: IME composition, and an on-screen keyboard where no physical one is | [detail](ROADMAP_DETAIL.md#ime) |
 | WIN-17 | **Keyboards beyond the US layout**: their extra keys named, and each key's label in the player's layout | [detail](ROADMAP_DETAIL.md#international-keys) |
 | WIN-6 | **The clipboard** | [detail](ROADMAP_DETAIL.md#clipboard) |
 | WIN-7 | **Cursor shapes** | [detail](ROADMAP_DETAIL.md#cursor-shapes) |

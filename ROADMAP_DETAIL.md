@@ -49,11 +49,25 @@ DirectInput's init check `SDL_UsingGameInputForXInputControllers()`); no release
 When one does, the vendored SDL moves to it and the package's switch goes, with the duplicate's test kept.
 
 <a id="ime"></a>
-## WIN-5: text input with IME composition
+## WIN-5: text input turned on and off, IME composition, and an on-screen keyboard
 
 On the web, `compositionstart`, `compositionupdate` and `compositionend`, the composed text coming out as `Text`. A
 program says where the caret is, so the IME's window sits beside it. Natively, what GLFW gives for an IME's
 composition is to be measured before the design, and the platform's own API used where it gives none.
+
+**Widened by kyoten** (its docs/design/input.md § Decided, 2026-11-25, the fifth part's question 2, the owner's (A)): a
+program turns text input on and off, as SDL3's `SDL_StartTextInput` does, where text input is "not received by default"
+and starting it turns on an IME and shows a screen keyboard where no physical one is.
+- **Off:** no `Text`, and no IME, so an IME left on cannot swallow a game's keys as it composes (winit's
+  `set_ime_allowed`, off by default: "Not allowing IME is useful for games").
+- **On:** the IME, its window beside the box the program names; and an on-screen keyboard where there is no physical
+  one. On the web that is a focused editable element, its `inputmode` choosing the keyboard (or an `EditContext` where a
+  browser has one); natively the platform's, Steam's floating keyboard on SteamOS as SDL3 opens it
+  (`steam://open/keyboard`). Valve's Deck Verified asks games to "automatically display an on-screen keyboard when
+  requiring the user to input text".
+- **What it takes from the program:** on or off, and with WIN-5 the field's purpose (text, a number, an email, a
+  password), its longest length, its lines and its box. kyoten's `Platform.textEntry` calls it, a stopgap that does
+  nothing until this row is built.
 
 <a id="international-keys"></a>
 ## WIN-17: keyboards beyond the US layout
